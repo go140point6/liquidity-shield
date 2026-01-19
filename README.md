@@ -1,27 +1,16 @@
-# discordjs-v14-bot-template
+# Liquidity Shield
 
-A clean, minimal **Discord.js v14 bot template** built for rapid iteration and reuse across multiple bots.
+A **Discord.js v14 verification gate** that tracks verification failures in SQLite and enforces kick/ban rules on a restart-safe schedule.
 
-This template focuses on:
-- Clear project structure
-- Safe startup and error handling
-- Environment-variable driven configuration
-- Consistent, controllable logging
-- Slash-command–first design (Discord.js v14)
+Core behavior:
+- On join, the bot starts a verification deadline.
+- If the member gains the Minion role before the deadline, it resets failures.
+- If the member is Penitent (jailed), it skips action.
+- If the deadline hits with no Minion role:
+  - First failure: kick.
+  - Second failure: ban.
 
----
-
-## What this template provides
-
-- Discord.js v14 client setup
-- Slash command loading and registration (guild-scoped for fast iteration)
-- Centralized environment validation
-- Structured event handlers (`onReady`, `onInteraction`, `onMessage`)
-- A tiny custom logger with:
-  - log levels
-  - always-visible startup messages
-  - optional colored output
-- Example commands and scheduled task logic for reference
+The deadline check runs on a DB-backed polling loop so it survives restarts.
 
 ---
 
@@ -57,19 +46,13 @@ cp .env-template .env
 
 Fill in the required values in `.env`.
 
-Start the bot (to test):
+Start the bot:
 
 ```bash
-node start
+node index.js
 ```
 
-For development, you can also run:
-
-```bash
-DEBUG=2 npm run dev
-```
-
-RECOMMENDED: Use pm2 or other process manager for production.
+RECOMMENDED: Use pm2 or another process manager for production.
 
 ---
 
@@ -79,10 +62,12 @@ All required configuration is provided via environment variables.
 
 At minimum, you must set:
 - `BOT_TOKEN`
-- `CLIENT_ID`
 - `GUILD_ID`
-
-Optional variables control logging verbosity and example schedulers.
+- `ROLE_VERIFIED_ID`
+- `ROLE_JAIL_ID`
+- `ADMIN_LOG_CHANNEL_ID`
+- `VERIFY_TIMEOUT_MIN`
+- `POLL_INTERVAL_SEC`
 
 See `.env-template` for the full list.
 
@@ -108,4 +93,3 @@ Full documentation:
 ## License
 
 MIT
-

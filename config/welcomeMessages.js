@@ -1,0 +1,30 @@
+// ./config/welcomeMessages.js
+const welcomeMessages = [
+  "Arrival logged: {user}.",
+  "Presence detected: {user} has entered.",
+  "Ingress confirmed: {user}.",
+  "System acknowledges: {user}.",
+  "New entity registered: {user}.",
+  "Observation begins: {user}.",
+  "Entry recorded for: {user}.",
+  "Signal acquired: {user} is now present.",
+  "Connection established: {user}.",
+  "A new presence has been noted: {user}.",
+  "Registration complete: {user}.",
+  "Arrival sequence complete: {user}.",
+  "Monitoring initiated for: {user}.",
+  "Status update: {user} has joined.",
+  "System event — arrival: {user}.",
+  "Presence confirmed: {user}.",
+  "New arrival indexed: {user}.",
+  "Entry acknowledged: {user}.",
+  "A variable has entered the system: {user}.",
+  "Observation window opened for: {user}.",
+  "Arrival detected without incident: {user}.",
+  "Connection accepted: {user}.",
+  "System notes the arrival of: {user}.",
+  "Ingress successful: {user}.",
+  "The system registers: {user}.",
+];
+
+module.exports = { welcomeMessages };

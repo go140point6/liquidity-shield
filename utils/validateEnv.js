@@ -4,7 +4,19 @@ const log = require("./logger");
 
 function validateEnv() {
   // Add any additional required env vars here
-  const requiredVars = ["BOT_TOKEN", "CLIENT_ID", "GUILD_ID", "PRICE_INTERVAL_MIN"];
+  const requiredVars = [
+    "BOT_TOKEN",
+    "GUILD_ID",
+    "ROLE_VERIFIED_ID",
+    "ROLE_JAIL_ID",
+    "ADMIN_LOG_CHANNEL_ID",
+    "RULES_CHANNEL_ID",
+    "RULES_EMOJI",
+    "WELCOME_CHANNEL_ID",
+    "ROLE_INITIATE_ID",
+    "VERIFY_TIMEOUT_MIN",
+    "POLL_INTERVAL_SEC",
+  ];
 
   const missing = requiredVars.filter(
     (key) => !process.env[key] || !process.env[key].trim()
@@ -19,12 +31,14 @@ function validateEnv() {
     process.exit(1);
   }
 
-  // Validate PRICE_INTERVAL_MIN is a positive integer (since you use it in onReady)
-  const raw = process.env.PRICE_INTERVAL_MIN.trim();
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n <= 0) {
-    log.error(`PRICE_INTERVAL_MIN must be a positive integer. Got: "${raw}"`);
-    process.exit(1);
+  const intVars = ["VERIFY_TIMEOUT_MIN", "POLL_INTERVAL_SEC"];
+  for (const key of intVars) {
+    const raw = process.env[key].trim();
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      log.error(`${key} must be a positive integer. Got: "${raw}"`);
+      process.exit(1);
+    }
   }
 }
 
