@@ -31,6 +31,7 @@ const config = {
   rulesEmoji: requireEnv("RULES_EMOJI"),
   welcomeChannelId: requireEnv("WELCOME_CHANNEL_ID"),
   roleInitiateId: requireEnv("ROLE_INITIATE_ID"),
+  roleAutomataId: requireEnv("ROLE_AUTOMATA_ID"),
   verifyTimeoutMs: requireIntEnv("VERIFY_TIMEOUT_MIN") * 60 * 1000,
   pollIntervalMs: requireIntEnv("POLL_INTERVAL_SEC") * 1000,
   dbPath:

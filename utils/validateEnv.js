@@ -14,6 +14,7 @@ function validateEnv() {
     "RULES_EMOJI",
     "WELCOME_CHANNEL_ID",
     "ROLE_INITIATE_ID",
+    "ROLE_AUTOMATA_ID",
     "VERIFY_TIMEOUT_MIN",
     "POLL_INTERVAL_SEC",
   ];
