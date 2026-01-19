@@ -1,11 +1,16 @@
 // ./index.js
-require("dotenv").config();
+require("dotenv").config({
+  quiet: true,
+});
 
-const { Client, Events } = require("discord.js");
+const { Client, Events, Partials } = require("discord.js");
 const { GatewayIntentBits } = require("./config/GatewayIntentBits");
 const { onReady } = require("./events/onReady");
-const { onInteraction } = require("./events/onInteraction");
+const { onGuildMemberAdd } = require("./events/onGuildMemberAdd");
+const { onGuildMemberUpdate } = require("./events/onGuildMemberUpdate");
 const { onMessage } = require("./events/onMessage");
+const { onMessageReactionAdd } = require("./events/onMessageReactionAdd");
+const { onMessageReactionRemove } = require("./events/onMessageReactionRemove");
 const { validateEnv } = require("./utils/validateEnv");
 const log = require("./utils/logger");
 
@@ -26,7 +31,10 @@ process.on("uncaughtException", (err) => {
 (async () => {
   validateEnv();
 
-  const client = new Client({ intents: GatewayIntentBits });
+  const client = new Client({
+    intents: GatewayIntentBits,
+    partials: [Partials.Message, Partials.Channel, Partials.Reaction],
+  });
   module.exports = client;
 
   client.once(Events.ClientReady, async () => {
@@ -37,11 +45,19 @@ process.on("uncaughtException", (err) => {
     }
   });
 
-  client.on(Events.InteractionCreate, async (interaction) => {
+  client.on(Events.GuildMemberAdd, async (member) => {
     try {
-      await onInteraction(interaction);
+      await onGuildMemberAdd(member);
     } catch (err) {
-      log.error("InteractionCreate handler failed:", err);
+      log.error("GuildMemberAdd handler failed:", err);
+    }
+  });
+
+  client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
+    try {
+      await onGuildMemberUpdate(oldMember, newMember);
+    } catch (err) {
+      log.error("GuildMemberUpdate handler failed:", err);
     }
   });
 
@@ -50,6 +66,22 @@ process.on("uncaughtException", (err) => {
       await onMessage(message);
     } catch (err) {
       log.error("MessageCreate handler failed:", err);
+    }
+  });
+
+  client.on(Events.MessageReactionAdd, async (reaction, user) => {
+    try {
+      await onMessageReactionAdd(reaction, user);
+    } catch (err) {
+      log.error("MessageReactionAdd handler failed:", err);
+    }
+  });
+
+  client.on(Events.MessageReactionRemove, async (reaction, user) => {
+    try {
+      await onMessageReactionRemove(reaction, user);
+    } catch (err) {
+      log.error("MessageReactionRemove handler failed:", err);
     }
   });
 
