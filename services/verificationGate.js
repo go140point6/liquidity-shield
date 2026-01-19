@@ -27,6 +27,11 @@ async function handleMemberAdd(member) {
   if (!db) throw new Error("DB not initialized");
   if (member.guild.id !== config.guildId) return;
 
+  if (member.user?.bot) {
+    await addAutomataRole(member);
+    return;
+  }
+
   const existingState = queries.getState(db, {
     guildId: member.guild.id,
     userId: member.id,
@@ -260,6 +265,15 @@ async function addInitiateRole(member) {
     await member.roles.add(config.roleInitiateId, "Assigned on join.");
   } catch (err) {
     log.warn(`Failed to add initiate role to ${member.id}.`, err);
+  }
+}
+
+async function addAutomataRole(member) {
+  if (member.roles.cache.has(config.roleAutomataId)) return;
+  try {
+    await member.roles.add(config.roleAutomataId, "Assigned to bot on join.");
+  } catch (err) {
+    log.warn(`Failed to add Automata role to ${member.id}.`, err);
   }
 }
 
