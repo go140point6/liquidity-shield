@@ -1,14 +1,21 @@
 // ./events/onMessage.js
 
 const { PermissionFlagsBits } = require("discord.js");
+const path = require("node:path");
 const { config } = require("../config/botConfig");
 const { rulesText } = require("../config/rulesText");
+const { faqText } = require("../config/faqText");
+const { quickStartBlocks } = require("../config/quickStartContent");
 const log = require("../utils/logger");
 const { sendAdminLog } = require("../utils/adminLog");
 const {
   resetFailsForUser,
   getRulesConfig,
   setRulesConfig,
+  getFaqConfig,
+  setFaqConfig,
+  getQuickStartConfig,
+  setQuickStartConfig,
   setJailedForUser,
 } = require("../services/verificationGate");
 
@@ -158,7 +165,71 @@ async function onMessage(message) {
     }
   }
 
-  if (command === "!jail" || command === "!penitent") {
+  if (command === "!postfaq") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    try {
+      const channel = await message.client.channels.fetch(config.faqChannelId);
+      if (!channel || !channel.isTextBased()) {
+        await message.reply("❌ FAQ channel is missing or not text-based.");
+        return;
+      }
+
+      const posted = await channel.send(faqText);
+      setFaqConfig(message.guild.id, channel.id, posted.id);
+      await message.reply(`✅ FAQ posted in <#${channel.id}>.`);
+
+      await sendAdminLog(message.client, {
+        title: "Liquidity Shield: FAQ Posted",
+        description: `Posted by ${message.author.tag}`,
+        color: 0x4caf50,
+        fields: [{ name: "Channel", value: `<#${channel.id}>`, inline: true }],
+      });
+    } catch (err) {
+      log.error("postfaq command failed.", err);
+      await message.reply("❌ Failed to post FAQ. Check logs.");
+    }
+  }
+
+  if (command === "!editfaq") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    try {
+      const existing = getFaqConfig(message.guild.id);
+      if (!existing) {
+        await message.reply("ℹ️ No stored FAQ message. Use `!postfaq` first.");
+        return;
+      }
+
+      const channel = await message.client.channels.fetch(existing.channel_id);
+      if (!channel || !channel.isTextBased()) {
+        await message.reply("❌ FAQ channel is missing or not text-based.");
+        return;
+      }
+
+      const msg = await channel.messages.fetch(existing.message_id);
+      await msg.edit(faqText);
+      await message.reply("✅ FAQ message updated.");
+
+      await sendAdminLog(message.client, {
+        title: "Liquidity Shield: FAQ Edited",
+        description: `Edited by ${message.author.tag}`,
+        color: 0x2196f3,
+        fields: [{ name: "Channel", value: `<#${channel.id}>`, inline: true }],
+      });
+    } catch (err) {
+      log.error("editfaq command failed.", err);
+      await message.reply("❌ Failed to edit FAQ. Check logs.");
+    }
+  }
+
+  if (command === "!punish" || command === "!jail") {
     if (!message.member?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
       await message.reply("❌ You do not have permission to use this command.");
       return;
@@ -166,7 +237,7 @@ async function onMessage(message) {
 
     const userId = extractUserId(args[0]);
     if (!userId) {
-      await message.reply("Usage: `!jail <userId|@mention>`");
+      await message.reply("Usage: `!punish <userId|@mention>`");
       return;
     }
 
@@ -180,13 +251,13 @@ async function onMessage(message) {
     }
 
     try {
-      await target.roles.set([config.roleJailId], "Manual jail command.");
+      await target.roles.set([config.roleJailId], "Manual punish command.");
       await setJailedForUser(message.guild.id, userId, message.author?.tag);
-      await message.reply(`✅ ${target.user.tag} jailed.`);
+      await message.reply(`✅ ${target.user.tag} punished.`);
 
       await sendAdminLog(message.client, {
-        title: "Liquidity Shield: Manual Jail",
-        description: `Jailed by ${message.author.tag}`,
+        title: "Liquidity Shield: Manual Punish",
+        description: `Punished by ${message.author.tag}`,
         color: 0xff9800,
         fields: [{ name: "User ID", value: userId, inline: true }],
       });
@@ -396,6 +467,139 @@ async function onMessage(message) {
       await message.reply("❌ Failed to update roles. Check logs.");
     }
   }
+
+  if (command === "!help") {
+    const lines = [
+      "**Liquidity Shield Commands**",
+      "",
+      "`!copychannelperms` — Copy channel overwrites from one role to another.",
+      "`!copyroleperms` — Copy base permissions from one role to another.",
+      "`!postfaq` — Post the FAQ and save its message ID.",
+      "`!editfaq` — Edit the stored FAQ post.",
+      "`!postqs` — Post the quick-start message set.",
+      "`!editqs` — Re-post the quick-start messages.",
+      "`!postrules` — Post the rules and save its message ID.",
+      "`!editrules` — Edit the stored rules post.",
+      "`!promote` — Set a user's role to one target role (humans only).",
+      "`!demote` — Set a user's role to one target role (humans only).",
+      "`!punish` — Strip roles and assign Penitent.",
+      "`!resetfails` — Reset a user's verification fail count.",
+    ];
+
+    await message.reply(lines.join("\n"));
+  }
+
+  if (command === "!postqs") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    try {
+      const channel = await message.client.channels.fetch(
+        config.quickStartChannelId
+      );
+      if (!channel || !channel.isTextBased()) {
+        await message.reply("❌ Quick-start channel is missing or not text-based.");
+        return;
+      }
+
+      const messageIds = await postQuickStart(channel);
+      setQuickStartConfig(message.guild.id, channel.id, JSON.stringify(messageIds));
+      await message.reply(`✅ Quick-start posted in <#${channel.id}>.`);
+
+      await sendAdminLog(message.client, {
+        title: "Liquidity Shield: Quick-Start Posted",
+        description: `Posted by ${message.author.tag}`,
+        color: 0x4caf50,
+        fields: [{ name: "Channel", value: `<#${channel.id}>`, inline: true }],
+      });
+    } catch (err) {
+      log.error("postqs command failed.", err);
+      await message.reply("❌ Failed to post quick-start. Check logs.");
+    }
+  }
+
+  if (command === "!editqs") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    try {
+      const existing = getQuickStartConfig(message.guild.id);
+      if (!existing) {
+        await message.reply("ℹ️ No stored quick-start. Use `!postqs` first.");
+        return;
+      }
+
+      const channel = await message.client.channels.fetch(existing.channel_id);
+      if (!channel || !channel.isTextBased()) {
+        await message.reply("❌ Quick-start channel is missing or not text-based.");
+        return;
+      }
+
+      const messageIds = safeParseJsonArray(existing.message_ids);
+      for (const id of messageIds) {
+        try {
+          const msg = await channel.messages.fetch(id);
+          await msg.delete();
+        } catch {
+          // ignore missing messages
+        }
+      }
+
+      const newMessageIds = await postQuickStart(channel);
+      setQuickStartConfig(
+        message.guild.id,
+        channel.id,
+        JSON.stringify(newMessageIds)
+      );
+      await message.reply("✅ Quick-start re-posted.");
+
+      await sendAdminLog(message.client, {
+        title: "Liquidity Shield: Quick-Start Edited",
+        description: `Edited by ${message.author.tag}`,
+        color: 0x2196f3,
+        fields: [{ name: "Channel", value: `<#${channel.id}>`, inline: true }],
+      });
+    } catch (err) {
+      log.error("editqs command failed.", err);
+      await message.reply("❌ Failed to edit quick-start. Check logs.");
+    }
+  }
+}
+
+function safeParseJsonArray(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function postQuickStart(channel) {
+  const messageIds = [];
+
+  for (const block of quickStartBlocks) {
+    if (block.type === "text") {
+      const msg = await channel.send(block.content);
+      messageIds.push(msg.id);
+      continue;
+    }
+
+    if (block.type === "images") {
+      const files = block.files.map((file) => ({
+        attachment: path.join(__dirname, "..", "img", file),
+        name: file,
+      }));
+      const msg = await channel.send({ files });
+      messageIds.push(msg.id);
+    }
+  }
+
+  return messageIds;
 }
 
 module.exports = { onMessage };
