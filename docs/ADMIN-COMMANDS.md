@@ -43,17 +43,78 @@ Usage:
 
 Required permission: `Manage Server`
 
-## !jail
+## !postfaq
+
+Posts the FAQ message in the configured FAQ channel and saves the message ID so
+it can be edited later.
+
+Usage:
+
+```
+!postfaq
+```
+
+Required permission: `Manage Server`
+
+## !editfaq
+
+Edits the stored FAQ message with the current contents of `config/faqText.js`.
+
+Usage:
+
+```
+!editfaq
+```
+
+Required permission: `Manage Server`
+
+## !postqs
+
+Posts the quick-start message set in the configured channel and saves message
+IDs so it can be re-posted later.
+
+Usage:
+
+```
+!postqs
+```
+
+Required permission: `Manage Server`
+
+## !editqs
+
+Re-posts the quick-start messages using the current contents of
+`config/quickStartContent.js`.
+
+Usage:
+
+```
+!editqs
+```
+
+Required permission: `Manage Server`
+
+## !help
+
+Shows a list of available commands with short summaries.
+
+Usage:
+
+```
+!help
+```
+
+## !punish
 
 Strips all roles from a user and assigns the Penitent role.
 
 Usage:
 
 ```
-!jail <userId|@mention>
+!punish <userId|@mention>
 ```
 
-Alias: `!penitent`
+Alias: `!jail`
 
 Required permission: `Manage Roles`
 

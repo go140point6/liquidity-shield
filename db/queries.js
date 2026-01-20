@@ -35,6 +35,20 @@ function initSchema(db) {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS faq_config (
+      guild_id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS quickstart_config (
+      guild_id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      message_ids TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS welcome_state (
       guild_id TEXT PRIMARY KEY,
       last_index INTEGER NOT NULL DEFAULT 0,
@@ -212,6 +226,56 @@ function getRulesMessage(db, { guildId }) {
     .get(guildId);
 }
 
+function setFaqMessage(db, { guildId, channelId, messageId, at }) {
+  db.prepare(
+    `
+    INSERT INTO faq_config (guild_id, channel_id, message_id, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      channel_id = excluded.channel_id,
+      message_id = excluded.message_id,
+      updated_at = excluded.updated_at
+  `
+  ).run(guildId, channelId, messageId, at);
+}
+
+function getFaqMessage(db, { guildId }) {
+  return db
+    .prepare(
+      `
+    SELECT guild_id, channel_id, message_id, updated_at
+    FROM faq_config
+    WHERE guild_id = ?
+  `
+    )
+    .get(guildId);
+}
+
+function setQuickStartMessage(db, { guildId, channelId, messageIds, at }) {
+  db.prepare(
+    `
+    INSERT INTO quickstart_config (guild_id, channel_id, message_ids, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(guild_id) DO UPDATE SET
+      channel_id = excluded.channel_id,
+      message_ids = excluded.message_ids,
+      updated_at = excluded.updated_at
+  `
+  ).run(guildId, channelId, messageIds, at);
+}
+
+function getQuickStartMessage(db, { guildId }) {
+  return db
+    .prepare(
+      `
+    SELECT guild_id, channel_id, message_ids, updated_at
+    FROM quickstart_config
+    WHERE guild_id = ?
+  `
+    )
+    .get(guildId);
+}
+
 function getWelcomeState(db, { guildId }) {
   return db
     .prepare(
@@ -275,6 +339,10 @@ module.exports = {
   resetFails,
   setRulesMessage,
   getRulesMessage,
+  setFaqMessage,
+  getFaqMessage,
+  setQuickStartMessage,
+  getQuickStartMessage,
   getWelcomeState,
   setWelcomeState,
 };

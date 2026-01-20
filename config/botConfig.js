@@ -29,6 +29,8 @@ const config = {
   adminLogChannelId: requireEnv("ADMIN_LOG_CHANNEL_ID"),
   rulesChannelId: requireEnv("RULES_CHANNEL_ID"),
   rulesEmoji: requireEnv("RULES_EMOJI"),
+  faqChannelId: requireEnv("FAQ_CHANNEL_ID"),
+  quickStartChannelId: requireEnv("QUICKSTART_CHANNEL_ID"),
   welcomeChannelId: requireEnv("WELCOME_CHANNEL_ID"),
   roleInitiateId: requireEnv("ROLE_INITIATE_ID"),
   roleAutomataId: requireEnv("ROLE_AUTOMATA_ID"),

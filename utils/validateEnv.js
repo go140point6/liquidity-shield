@@ -12,6 +12,8 @@ function validateEnv() {
     "ADMIN_LOG_CHANNEL_ID",
     "RULES_CHANNEL_ID",
     "RULES_EMOJI",
+    "FAQ_CHANNEL_ID",
+    "QUICKSTART_CHANNEL_ID",
     "WELCOME_CHANNEL_ID",
     "ROLE_INITIATE_ID",
     "ROLE_AUTOMATA_ID",

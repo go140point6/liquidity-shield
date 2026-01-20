@@ -540,6 +540,34 @@ module.exports = {
       at: now,
     });
   },
+  getFaqConfig: (guildId) => {
+    if (!db) throw new Error("DB not initialized");
+    return queries.getFaqMessage(db, { guildId });
+  },
+  setFaqConfig: (guildId, channelId, messageId) => {
+    if (!db) throw new Error("DB not initialized");
+    const now = Date.now();
+    queries.setFaqMessage(db, {
+      guildId,
+      channelId,
+      messageId,
+      at: now,
+    });
+  },
+  getQuickStartConfig: (guildId) => {
+    if (!db) throw new Error("DB not initialized");
+    return queries.getQuickStartMessage(db, { guildId });
+  },
+  setQuickStartConfig: (guildId, channelId, messageIds) => {
+    if (!db) throw new Error("DB not initialized");
+    const now = Date.now();
+    queries.setQuickStartMessage(db, {
+      guildId,
+      channelId,
+      messageIds,
+      at: now,
+    });
+  },
   setJailedForUser: async (guildId, userId, actorTag) => {
     if (!db) throw new Error("DB not initialized");
 
