@@ -49,6 +49,20 @@ function initSchema(db) {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS message_cache (
+      message_id TEXT PRIMARY KEY,
+      guild_id TEXT,
+      channel_id TEXT,
+      author_id TEXT,
+      author_tag TEXT,
+      content TEXT,
+      attachments TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_message_cache_created_at
+      ON message_cache (created_at);
+
     CREATE TABLE IF NOT EXISTS welcome_state (
       guild_id TEXT PRIMARY KEY,
       last_index INTEGER NOT NULL DEFAULT 0,
@@ -276,6 +290,91 @@ function getQuickStartMessage(db, { guildId }) {
     .get(guildId);
 }
 
+function upsertMessageCache(db, entry) {
+  db.prepare(
+    `
+    INSERT INTO message_cache (
+      message_id,
+      guild_id,
+      channel_id,
+      author_id,
+      author_tag,
+      content,
+      attachments,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(message_id) DO UPDATE SET
+      guild_id = excluded.guild_id,
+      channel_id = excluded.channel_id,
+      author_id = excluded.author_id,
+      author_tag = excluded.author_tag,
+      content = excluded.content,
+      attachments = excluded.attachments,
+      created_at = excluded.created_at
+  `
+  ).run(
+    entry.id,
+    entry.guildId,
+    entry.channelId,
+    entry.authorId,
+    entry.authorTag,
+    entry.content,
+    entry.attachments,
+    entry.createdAt
+  );
+}
+
+function getMessageCache(db, messageId) {
+  return db
+    .prepare(
+      `
+    SELECT message_id, guild_id, channel_id, author_id, author_tag, content, attachments, created_at
+    FROM message_cache
+    WHERE message_id = ?
+  `
+    )
+    .get(messageId);
+}
+
+function deleteExpiredMessageCache(db, cutoff) {
+  db.prepare(`DELETE FROM message_cache WHERE created_at < ?`).run(cutoff);
+}
+
+function getMessageCacheByAuthorSince(db, { authorId, since, limit }) {
+  return db
+    .prepare(
+      `
+    SELECT message_id, guild_id, channel_id, author_id, author_tag, content, attachments, created_at
+    FROM message_cache
+    WHERE author_id = ? AND created_at >= ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `
+    )
+    .all(authorId, since, limit);
+}
+
+function setStatus(db, { guildId, userId, status, at }) {
+  db.prepare(
+    `
+    INSERT INTO verification_state (
+      guild_id,
+      user_id,
+      verify_fails,
+      status,
+      last_action_at,
+      deadline_at
+    )
+    VALUES (?, ?, 0, ?, ?, NULL)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+      status = excluded.status,
+      last_action_at = excluded.last_action_at,
+      deadline_at = NULL
+  `
+  ).run(guildId, userId, status, at);
+}
+
 function getWelcomeState(db, { guildId }) {
   return db
     .prepare(
@@ -343,6 +442,11 @@ module.exports = {
   getFaqMessage,
   setQuickStartMessage,
   getQuickStartMessage,
+  upsertMessageCache,
+  getMessageCache,
+  deleteExpiredMessageCache,
+  getMessageCacheByAuthorSince,
+  setStatus,
   getWelcomeState,
   setWelcomeState,
 };

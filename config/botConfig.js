@@ -1,44 +1,43 @@
 // ./config/botConfig.js
 const path = require("node:path");
-const log = require("../utils/logger");
-
-function requireEnv(name) {
-  const val = process.env[name];
-  if (!val || !val.trim()) {
-    log.error(`Missing required env var ${name}. Add it to your .env file.`);
-    process.exit(1);
-  }
-  return val.trim();
+function readEnv(name) {
+  return process.env[name]?.trim() || "";
 }
 
-function requireIntEnv(name) {
-  const raw = requireEnv(name);
+function parseCsvEnv(name) {
+  const raw = readEnv(name);
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((val) => val.trim())
+    .filter(Boolean);
+}
+
+function readIntEnv(name) {
+  const raw = readEnv(name);
   const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n <= 0) {
-    log.error(`Env var ${name} must be a positive integer. Got: "${raw}"`);
-    process.exit(1);
-  }
-  return n;
+  return Number.isFinite(n) ? n : 0;
 }
 
 const config = {
-  token: requireEnv("BOT_TOKEN"),
-  guildId: requireEnv("GUILD_ID"),
-  roleVerifiedId: requireEnv("ROLE_VERIFIED_ID"),
-  roleJailId: requireEnv("ROLE_JAIL_ID"),
-  adminLogChannelId: requireEnv("ADMIN_LOG_CHANNEL_ID"),
-  rulesChannelId: requireEnv("RULES_CHANNEL_ID"),
-  rulesEmoji: requireEnv("RULES_EMOJI"),
-  faqChannelId: requireEnv("FAQ_CHANNEL_ID"),
-  quickStartChannelId: requireEnv("QUICKSTART_CHANNEL_ID"),
-  welcomeChannelId: requireEnv("WELCOME_CHANNEL_ID"),
-  roleInitiateId: requireEnv("ROLE_INITIATE_ID"),
-  roleAutomataId: requireEnv("ROLE_AUTOMATA_ID"),
-  verifyTimeoutMs: requireIntEnv("VERIFY_TIMEOUT_MIN") * 60 * 1000,
-  pollIntervalMs: requireIntEnv("POLL_INTERVAL_SEC") * 1000,
-  dbPath:
-    process.env.DB_PATH?.trim() ||
-    path.join(__dirname, "..", "data", "liquidity-shield.sqlite"),
+  token: readEnv("BOT_TOKEN"),
+  guildId: readEnv("GUILD_ID"),
+  roleVerifiedId: readEnv("ROLE_VERIFIED_ID"),
+  roleJailId: readEnv("ROLE_JAIL_ID"),
+  adminLogChannelId: readEnv("ADMIN_LOG_CHANNEL_ID"),
+  rulesChannelId: readEnv("RULES_CHANNEL_ID"),
+  rulesEmoji: readEnv("RULES_EMOJI"),
+  faqChannelId: readEnv("FAQ_CHANNEL_ID"),
+  quickStartChannelId: readEnv("QUICKSTART_CHANNEL_ID"),
+  welcomeChannelId: readEnv("WELCOME_CHANNEL_ID"),
+  roleInitiateId: readEnv("ROLE_INITIATE_ID"),
+  roleAutomataId: readEnv("ROLE_AUTOMATA_ID"),
+  verifyTimeoutMs: readIntEnv("VERIFY_TIMEOUT_MIN") * 60 * 1000,
+  pollIntervalMs: readIntEnv("POLL_INTERVAL_SEC") * 1000,
+  excludedChannelIds: parseCsvEnv("EXCLUDED_CHANNEL_IDS"),
+  excludedCategoryIds: parseCsvEnv("EXCLUDED_CATEGORY_IDS"),
+  protectedRoleIds: parseCsvEnv("PROTECTED_ROLE_IDS"),
+  dbPath: readEnv("DB_PATH"),
 };
 
 module.exports = { config };

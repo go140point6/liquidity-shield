@@ -11,6 +11,7 @@ const intents = [
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.MessageContent,
   GatewayIntentBits.GuildMessageReactions,
+  GatewayIntentBits.GuildModeration,
 ];
 
 module.exports = {

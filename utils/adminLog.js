@@ -24,7 +24,18 @@ async function sendAdminLog(client, { title, description, color, fields }) {
     .setTimestamp(new Date());
 
   if (Array.isArray(fields) && fields.length > 0) {
-    embed.addFields(fields);
+    const safeFields = fields
+      .filter((field) => field && field.name && field.value !== undefined)
+      .map((field) => ({
+        ...field,
+        value:
+          typeof field.value === "string"
+            ? field.value.slice(0, 1024)
+            : String(field.value).slice(0, 1024),
+      }));
+    if (safeFields.length > 0) {
+      embed.addFields(safeFields);
+    }
   }
 
   try {

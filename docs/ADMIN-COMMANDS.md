@@ -68,6 +68,19 @@ Usage:
 
 Required permission: `Manage Server`
 
+## !ban
+
+Bans a user and deletes up to 7 days of their messages (default). Use `save`
+to ban without deleting messages.
+
+Usage:
+
+```
+!ban <userId|@mention> [save]
+```
+
+Required permission: `Ban Members`
+
 ## !postqs
 
 Posts the quick-start message set in the configured channel and saves message
@@ -104,17 +117,23 @@ Usage:
 !help
 ```
 
-## !punish
+## Moderation Logs
+
+Shield logs message edits, deletions, and bulk deletions to the admin log
+channel. You can exclude channels or categories using `EXCLUDED_CHANNEL_IDS`
+and `EXCLUDED_CATEGORY_IDS` in `.env`.
+
+It also logs bans, kicks/leaves, nickname changes, and timeouts.
+
+## !interment
 
 Strips all roles from a user and assigns the Penitent role.
 
 Usage:
 
 ```
-!punish <userId|@mention>
+!interment <userId|@mention>
 ```
-
-Alias: `!jail`
 
 Required permission: `Manage Roles`
 
@@ -148,26 +167,30 @@ that are not in sync.
 
 Required permission: `Manage Channels`
 
-## !promote
+## !elevate
 
 Sets a user's roles to only the specified role (humans only).
 
 Usage:
 
 ```
-!promote @user @role
+!elevate @user @role
 ```
 
 Required permission: `Manage Roles`
 
-## !demote
+Alias: `!promote`
+
+## !reassign
 
 Sets a user's roles to only the specified role (humans only).
 
 Usage:
 
 ```
-!demote @user @role
+!reassign @user @role
 ```
 
 Required permission: `Manage Roles`
+
+Alias: `!demote`

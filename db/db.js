@@ -4,6 +4,8 @@ const fs = require("node:fs");
 const Database = require("better-sqlite3");
 const log = require("../utils/logger");
 
+let dbInstance = null;
+
 function openDb(dbPath) {
   const resolved = path.resolve(dbPath);
   const dir = path.dirname(resolved);
@@ -14,7 +16,12 @@ function openDb(dbPath) {
     throw err;
   }
 
-  return new Database(resolved);
+  dbInstance = new Database(resolved);
+  return dbInstance;
 }
 
-module.exports = { openDb };
+function getDb() {
+  return dbInstance;
+}
+
+module.exports = { openDb, getDb };

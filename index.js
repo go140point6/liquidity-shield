@@ -8,7 +8,14 @@ const { GatewayIntentBits } = require("./config/GatewayIntentBits");
 const { onReady } = require("./events/onReady");
 const { onGuildMemberAdd } = require("./events/onGuildMemberAdd");
 const { onGuildMemberUpdate } = require("./events/onGuildMemberUpdate");
+const { onGuildMemberRemove } = require("./events/onGuildMemberRemove");
+const { onGuildBanAdd } = require("./events/onGuildBanAdd");
+const { onGuildAuditLogEntryCreate } = require("./events/onGuildAuditLogEntryCreate");
+const { onUserUpdate } = require("./events/onUserUpdate");
 const { onMessage } = require("./events/onMessage");
+const { onMessageUpdate } = require("./events/onMessageUpdate");
+const { onMessageDelete } = require("./events/onMessageDelete");
+const { onMessageDeleteBulk } = require("./events/onMessageDeleteBulk");
 const { onMessageReactionAdd } = require("./events/onMessageReactionAdd");
 const { onMessageReactionRemove } = require("./events/onMessageReactionRemove");
 const { validateEnv } = require("./utils/validateEnv");
@@ -61,11 +68,67 @@ process.on("uncaughtException", (err) => {
     }
   });
 
+  client.on(Events.GuildMemberRemove, async (member) => {
+    try {
+      await onGuildMemberRemove(member);
+    } catch (err) {
+      log.error("GuildMemberRemove handler failed:", err);
+    }
+  });
+
+  client.on(Events.GuildBanAdd, async (ban) => {
+    try {
+      await onGuildBanAdd(ban);
+    } catch (err) {
+      log.error("GuildBanAdd handler failed:", err);
+    }
+  });
+
+  client.on(Events.GuildAuditLogEntryCreate, async (entry, guild) => {
+    try {
+      await onGuildAuditLogEntryCreate(entry, guild);
+    } catch (err) {
+      log.error("GuildAuditLogEntryCreate handler failed:", err);
+    }
+  });
+
+  client.on(Events.UserUpdate, async (oldUser, newUser) => {
+    try {
+      await onUserUpdate(oldUser, newUser, client);
+    } catch (err) {
+      log.error("UserUpdate handler failed:", err);
+    }
+  });
+
   client.on(Events.MessageCreate, async (message) => {
     try {
       await onMessage(message);
     } catch (err) {
       log.error("MessageCreate handler failed:", err);
+    }
+  });
+
+  client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
+    try {
+      await onMessageUpdate(oldMessage, newMessage);
+    } catch (err) {
+      log.error("MessageUpdate handler failed:", err);
+    }
+  });
+
+  client.on(Events.MessageDelete, async (message) => {
+    try {
+      await onMessageDelete(message);
+    } catch (err) {
+      log.error("MessageDelete handler failed:", err);
+    }
+  });
+
+  client.on(Events.MessageDeleteBulk, async (messages) => {
+    try {
+      await onMessageDeleteBulk(messages);
+    } catch (err) {
+      log.error("MessageDeleteBulk handler failed:", err);
     }
   });
 

@@ -8,6 +8,11 @@ const { faqText } = require("../config/faqText");
 const { quickStartBlocks } = require("../config/quickStartContent");
 const log = require("../utils/logger");
 const { sendAdminLog } = require("../utils/adminLog");
+const { setMessage, getRecentMessagesByAuthor } = require("../utils/messageCache");
+const { suppressBulkForUser } = require("../utils/modLogSuppress");
+const { suppressVerification, intermentMember } = require("../services/verificationGate");
+const { getDb } = require("../db/db");
+const { setStatus } = require("../db/queries");
 const {
   resetFailsForUser,
   getRulesConfig,
@@ -54,6 +59,8 @@ function overwritesMatch(a, b) {
 async function onMessage(message) {
   if (message.author?.bot) return;
   if (!message.guild) return;
+
+  setMessage(message);
 
   const content = message.content?.trim();
   if (!content || !content.startsWith("!")) return;
@@ -151,6 +158,7 @@ async function onMessage(message) {
 
       const msg = await channel.messages.fetch(existing.message_id);
       await msg.edit(rulesText);
+      log.debug(`Rules updated by ${message.author.tag} in ${channel.id}`);
       await message.reply("✅ Rules message updated.");
 
       await sendAdminLog(message.client, {
@@ -215,6 +223,7 @@ async function onMessage(message) {
 
       const msg = await channel.messages.fetch(existing.message_id);
       await msg.edit(faqText);
+      log.debug(`FAQ updated by ${message.author.tag} in ${channel.id}`);
       await message.reply("✅ FAQ message updated.");
 
       await sendAdminLog(message.client, {
@@ -229,7 +238,7 @@ async function onMessage(message) {
     }
   }
 
-  if (command === "!punish" || command === "!jail") {
+  if (command === "!interment") {
     if (!message.member?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
       await message.reply("❌ You do not have permission to use this command.");
       return;
@@ -237,7 +246,7 @@ async function onMessage(message) {
 
     const userId = extractUserId(args[0]);
     if (!userId) {
-      await message.reply("Usage: `!punish <userId|@mention>`");
+      await message.reply("Usage: `!interment <userId|@mention>`");
       return;
     }
 
@@ -245,25 +254,27 @@ async function onMessage(message) {
     try {
       target = await message.guild.members.fetch(userId);
     } catch (err) {
-      log.warn(`Failed to fetch member ${userId} for jail.`, err);
+      log.warn(`Failed to fetch member ${userId} for interment.`, err);
       await message.reply("❌ User not found in this server.");
       return;
     }
 
     try {
-      await target.roles.set([config.roleJailId], "Manual punish command.");
-      await setJailedForUser(message.guild.id, userId, message.author?.tag);
-      await message.reply(`✅ ${target.user.tag} punished.`);
+      await intermentMember(target, message.author?.tag);
+      await message.reply(`🔒 <@${userId}> has been placed in interment.`);
 
       await sendAdminLog(message.client, {
-        title: "Liquidity Shield: Manual Punish",
-        description: `Punished by ${message.author.tag}`,
+        title: "Liquidity Shield: Manual Interment",
+        description: `Interment by ${message.author.tag}`,
         color: 0xff9800,
-        fields: [{ name: "User ID", value: userId, inline: true }],
+        fields: [
+          { name: "User", value: `${target.user.tag} (<@${userId}>)`, inline: true },
+          { name: "User ID", value: userId, inline: true },
+        ],
       });
     } catch (err) {
-      log.error("jail command failed.", err);
-      await message.reply("❌ Failed to jail user. Check logs.");
+      log.error("interment command failed.", err);
+      await message.reply("❌ Failed to place user in interment. Check logs.");
     }
   }
 
@@ -414,7 +425,12 @@ async function onMessage(message) {
     }
   }
 
-  if (command === "!promote" || command === "!demote") {
+  if (
+    command === "!elevate" ||
+    command === "!promote" ||
+    command === "!reassign" ||
+    command === "!demote"
+  ) {
     if (!message.member?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
       await message.reply("❌ You do not have permission to use this command.");
       return;
@@ -459,9 +475,11 @@ async function onMessage(message) {
     const desiredRoles = [...managedRoles, targetRole.id];
     try {
       await member.roles.set(desiredRoles, `${command} command.`);
-      await message.reply(
-        `✅ ${member.user.tag} now has only ${targetRole.name}.`
-      );
+      if (command === "!elevate" || command === "!promote") {
+        await message.reply(`🔼 <@${userId}> has been elevated to <@&${roleId}>.`);
+      } else {
+        await message.reply(`🔽 <@${userId}> has been reassigned to <@&${roleId}>.`);
+      }
     } catch (err) {
       log.error(`${command} command failed.`, err);
       await message.reply("❌ Failed to update roles. Check logs.");
@@ -474,15 +492,16 @@ async function onMessage(message) {
       "",
       "`!copychannelperms` — Copy channel overwrites from one role to another.",
       "`!copyroleperms` — Copy base permissions from one role to another.",
+      "`!ban` — Ban a user and delete 7 days of messages (or use `save`).",
       "`!postfaq` — Post the FAQ and save its message ID.",
       "`!editfaq` — Edit the stored FAQ post.",
       "`!postqs` — Post the quick-start message set.",
       "`!editqs` — Re-post the quick-start messages.",
       "`!postrules` — Post the rules and save its message ID.",
       "`!editrules` — Edit the stored rules post.",
-      "`!promote` — Set a user's role to one target role (humans only).",
-      "`!demote` — Set a user's role to one target role (humans only).",
-      "`!punish` — Strip roles and assign Penitent.",
+      "`!elevate` — Set a user's role to one target role (humans only).",
+      "`!reassign` — Set a user's role to one target role (humans only).",
+      "`!interment` — Strip roles and assign Penitent.",
       "`!resetfails` — Reset a user's verification fail count.",
     ];
 
@@ -517,6 +536,85 @@ async function onMessage(message) {
     } catch (err) {
       log.error("postqs command failed.", err);
       await message.reply("❌ Failed to post quick-start. Check logs.");
+    }
+  }
+
+  if (command === "!ban") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.BanMembers)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    const userId = extractUserId(args[0]);
+    if (!userId) {
+      await message.reply("Usage: `!ban <userId|@mention> [save]`");
+      return;
+    }
+
+    const save = args[1]?.toLowerCase() === "save";
+    const deleteSeconds = save ? 0 : 7 * 24 * 60 * 60;
+
+    let targetTag = "Unknown";
+    try {
+      const member = await message.guild.members.fetch(userId);
+      targetTag = member.user.tag;
+    } catch {
+      // ignore; user might not be in guild
+    }
+
+    try {
+      log.info(
+        `[ban] requested by ${message.author.tag} target=${userId} save=${save}`
+      );
+      suppressVerification(userId, 120000);
+      const db = getDb();
+      if (db) {
+        setStatus(db, {
+          guildId: message.guild.id,
+          userId,
+          status: "banned",
+          at: Date.now(),
+        });
+      }
+
+      await message.guild.members.ban(userId, {
+        reason: `Manual ban by ${message.author.tag}`,
+        deleteMessageSeconds: deleteSeconds,
+      });
+
+      if (!save) {
+        suppressBulkForUser(userId);
+      }
+
+      await message.reply(
+        save
+          ? `✅ Banned ${targetTag} without deleting messages.`
+          : `✅ Banned ${targetTag} and deleted up to 7 days of messages.`
+      );
+
+      const since = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const samples = getRecentMessagesByAuthor(userId, since, 50);
+      if (samples.length > 0) {
+        const { lines, attachmentUrls } = buildBanEvidence(samples);
+
+      await sendAdminLog(message.client, {
+        title: "Ban Evidence (Cached)",
+        description: `Recent cached messages for ${targetTag}`,
+        color: 0x6d4c41,
+        fields: [
+          { name: "Samples", value: lines.slice(0, 10).join("\n") },
+          attachmentUrls.length
+            ? {
+                name: "Attachment URLs",
+                value: attachmentUrls.slice(0, 10).join("\n"),
+              }
+            : null,
+        ].filter(Boolean),
+      });
+      }
+    } catch (err) {
+      log.error("ban command failed.", err);
+      await message.reply("❌ Failed to ban user. Check logs.");
     }
   }
 
@@ -555,6 +653,7 @@ async function onMessage(message) {
         channel.id,
         JSON.stringify(newMessageIds)
       );
+      log.debug(`Quick-start updated by ${message.author.tag} in ${channel.id}`);
       await message.reply("✅ Quick-start re-posted.");
 
       await sendAdminLog(message.client, {
@@ -568,6 +667,44 @@ async function onMessage(message) {
       await message.reply("❌ Failed to edit quick-start. Check logs.");
     }
   }
+}
+
+function buildBanEvidence(samples) {
+  const seenContent = new Set();
+  const seenUrls = new Set();
+  const lines = [];
+  const attachmentUrls = [];
+
+  for (const m of samples) {
+    const content = (m.content || "").trim();
+    const key = content.toLowerCase();
+    const label = content ? content.slice(0, 160) : "(no content)";
+    const attachments = Array.isArray(m.attachments) ? m.attachments : [];
+
+    if (!seenContent.has(key)) {
+      seenContent.add(key);
+      lines.push(`• <#${m.channelId}> — ${label}`);
+    }
+
+    for (const url of attachments) {
+      const filename = extractFilename(url);
+      const fileKey = filename.toLowerCase();
+      if (seenUrls.has(fileKey)) continue;
+      seenUrls.add(fileKey);
+      attachmentUrls.push(url);
+    }
+
+    if (lines.length >= 25 && attachmentUrls.length >= 25) break;
+  }
+
+  return { lines, attachmentUrls };
+}
+
+function extractFilename(url) {
+  if (!url) return "";
+  const base = url.split("?")[0];
+  const parts = base.split("/");
+  return parts[parts.length - 1] || url;
 }
 
 function safeParseJsonArray(raw) {
