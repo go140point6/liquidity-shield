@@ -19,6 +19,12 @@ function validateEnv() {
     "ROLE_AUTOMATA_ID",
     "VERIFY_TIMEOUT_MIN",
     "POLL_INTERVAL_SEC",
+    "DB_PATH",
+    "MESSAGE_CACHE_MAX",
+    "MESSAGE_CACHE_TTL_HOURS",
+    "MESSAGE_CACHE_DB_ENABLED",
+    "MESSAGE_CACHE_DB_TTL_HOURS",
+    "PROTECTED_ROLE_IDS",
   ];
 
   const missing = requiredVars.filter(
@@ -34,7 +40,13 @@ function validateEnv() {
     process.exit(1);
   }
 
-  const intVars = ["VERIFY_TIMEOUT_MIN", "POLL_INTERVAL_SEC"];
+  const intVars = [
+    "VERIFY_TIMEOUT_MIN",
+    "POLL_INTERVAL_SEC",
+    "MESSAGE_CACHE_MAX",
+    "MESSAGE_CACHE_TTL_HOURS",
+    "MESSAGE_CACHE_DB_TTL_HOURS",
+  ];
   for (const key of intVars) {
     const raw = process.env[key].trim();
     const n = Number.parseInt(raw, 10);
@@ -42,6 +54,14 @@ function validateEnv() {
       log.error(`${key} must be a positive integer. Got: "${raw}"`);
       process.exit(1);
     }
+  }
+
+  const dbEnabled = process.env.MESSAGE_CACHE_DB_ENABLED.trim().toLowerCase();
+  if (dbEnabled !== "true" && dbEnabled !== "false") {
+    log.error(
+      `MESSAGE_CACHE_DB_ENABLED must be "true" or "false". Got: "${process.env.MESSAGE_CACHE_DB_ENABLED}"`
+    );
+    process.exit(1);
   }
 }
 

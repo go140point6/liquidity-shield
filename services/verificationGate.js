@@ -1,16 +1,69 @@
 // ./services/verificationGate.js
 const { config } = require("../config/botConfig");
 const { welcomeMessages } = require("../config/welcomeMessages");
+const { protectedNames } = require("../config/protectedNames");
+const { protectedIds } = require("../config/protectedIds");
 const log = require("../utils/logger");
 const { sendAdminLog } = require("../utils/adminLog");
 const { openDb } = require("../db/db");
+const { initMessageCacheDb } = require("../utils/messageCache");
 const queries = require("../db/queries");
 
 let db = null;
 let poller = null;
+const suppressedVerification = new Map();
+
+function suppressVerification(userId, ttlMs = 60000) {
+  suppressedVerification.set(userId, Date.now() + ttlMs);
+}
+
+function isVerificationSuppressed(userId) {
+  const expiry = suppressedVerification.get(userId);
+  if (!expiry) return false;
+  if (expiry < Date.now()) {
+    suppressedVerification.delete(userId);
+    return false;
+  }
+  return true;
+}
 
 function hasRole(member, roleId) {
   return member?.roles?.cache?.has(roleId);
+}
+
+function normalizeName(name) {
+  if (!name) return "";
+  return name.toLowerCase();
+}
+
+function getProtectedNameSet(guild) {
+  const exactNames = new Set();
+  for (const roleId of config.protectedRoleIds) {
+    const role = guild.roles.cache.get(roleId);
+    if (!role) continue;
+    for (const member of role.members.values()) {
+      if (member.displayName) exactNames.add(member.displayName);
+    }
+  }
+
+  for (const name of protectedNames) {
+    if (name) exactNames.add(name);
+  }
+
+  return { exactNames };
+}
+
+function isImpersonation(targetName, protectedSet, memberId) {
+  if (protectedIds.includes(memberId)) return false;
+  const raw = (targetName || "").trim().toLowerCase();
+  if (!raw) return false;
+
+  for (const name of protectedSet.exactNames) {
+    if (!name) continue;
+    if (raw === name.trim().toLowerCase()) return true;
+  }
+
+  return false;
 }
 
 function isUnknownMemberError(err) {
@@ -20,6 +73,7 @@ function isUnknownMemberError(err) {
 async function initVerificationGate(client) {
   db = await openDb(config.dbPath);
   await queries.initSchema(db);
+  initMessageCacheDb(db);
   startPoller(client);
 }
 
@@ -39,6 +93,27 @@ async function handleMemberAdd(member) {
 
   if (existingState?.status === "jailed" && !member.user?.bot) {
     await applyJailOnJoin(member);
+    return;
+  }
+
+  const protectedSet = getProtectedNameSet(member.guild);
+  const joinName =
+    member.displayName || member.nickname || member.user?.username || "";
+  if (isImpersonation(joinName, protectedSet, member.id)) {
+    await applyJailOnJoin(member);
+    await sendAdminLog(member.client, {
+      title: "Impersonation Detected (Join)",
+      description: `${member.user.tag} moved to interment on join.`,
+      color: 0xff5722,
+      fields: [
+        { name: "User", value: `<@${member.id}>`, inline: true },
+        { name: "User ID", value: member.id, inline: true },
+        { name: "Name", value: joinName || "*(none)*", inline: true },
+      ],
+    });
+    log.info(
+      `[impersonation] join interment user=${member.user.tag} name=${joinName}`
+    );
     return;
   }
 
@@ -115,6 +190,8 @@ async function handleMemberUpdate(oldMember, newMember) {
   const hasVerified = hasRole(newMember, config.roleVerifiedId);
   const hadJailed = hasRole(oldMember, config.roleJailId);
   const hasJailed = hasRole(newMember, config.roleJailId);
+  const hadInitiate = hasRole(oldMember, config.roleInitiateId);
+  const hasInitiate = hasRole(newMember, config.roleInitiateId);
 
   if (!hadVerified && hasVerified) {
     const now = Date.now();
@@ -148,6 +225,32 @@ async function handleMemberUpdate(oldMember, newMember) {
       at: now,
     });
     log.info(`Member jailed: ${newMember.user.tag} (${newMember.id})`);
+  }
+
+  if (
+    !newMember.user?.bot &&
+    !hadInitiate &&
+    hasInitiate &&
+    !hasVerified &&
+    !hasJailed
+  ) {
+    const now = Date.now();
+    const deadlineAt = now + config.verifyTimeoutMs;
+    await queries.upsertPending(db, {
+      guildId: newMember.guild.id,
+      userId: newMember.id,
+      joinAt: now,
+      deadlineAt,
+    });
+    await queries.logModeration(db, {
+      guildId: newMember.guild.id,
+      userId: newMember.id,
+      action: "initiate",
+      status: "pending",
+      details: `deadline_at=${deadlineAt}`,
+      at: now,
+    });
+    log.info(`Initiate re-verified: ${newMember.user.tag} (${newMember.id})`);
   }
 
   if (rolesChanged(oldMember, newMember)) {
@@ -328,6 +431,20 @@ function startPoller(client) {
 
 async function processDueRow(client, row) {
   if (row.guild_id !== config.guildId) return;
+  if (isVerificationSuppressed(row.user_id)) {
+    log.debug(`[verify-poller] suppressed user=${row.user_id}`);
+    return;
+  }
+  const current = queries.getState(db, {
+    guildId: row.guild_id,
+    userId: row.user_id,
+  });
+  if (current?.status && current.status !== "pending") {
+    log.debug(
+      `[verify-poller] skip status=${current.status} user=${row.user_id}`
+    );
+    return;
+  }
   const now = Date.now();
   let guild;
   try {
@@ -382,6 +499,13 @@ async function processDueRow(client, row) {
     return;
   }
 
+  log.debug(
+    `[verify-poller] user=${row.user_id} status=${current?.status || "none"} ` +
+      `fails=${row.verify_fails} deadline=${row.deadline_at} ` +
+      `hasVerified=${hasRole(member, config.roleVerifiedId)} ` +
+      `hasJailed=${hasRole(member, config.roleJailId)}`
+  );
+
   if (hasRole(member, config.roleVerifiedId)) {
     await queries.setVerified(db, {
       guildId: row.guild_id,
@@ -414,9 +538,26 @@ async function processDueRow(client, row) {
     return;
   }
 
+  if (isVerificationSuppressed(row.user_id)) return;
+  const latest = queries.getState(db, {
+    guildId: row.guild_id,
+    userId: row.user_id,
+  });
+  if (latest?.status && latest.status !== "pending") {
+    log.debug(
+      `[verify-poller] late-skip status=${latest.status} user=${row.user_id}`
+    );
+    return;
+  }
+
   if (row.verify_fails <= 0) {
     const reason = "Verification deadline missed (first failure).";
     try {
+      log.info(
+        `[verify-poller] kick user=${row.user_id} fails=${row.verify_fails} ` +
+          `hasVerified=${hasRole(member, config.roleVerifiedId)} ` +
+          `hasJailed=${hasRole(member, config.roleJailId)}`
+      );
       await member.kick(reason);
       await queries.setKicked(db, {
         guildId: row.guild_id,
@@ -437,6 +578,7 @@ async function processDueRow(client, row) {
         description: `${member.user.tag} missed verification deadline.`,
         color: 0xffc107,
         fields: [
+          { name: "User", value: `<@${row.user_id}>`, inline: true },
           { name: "User ID", value: row.user_id, inline: true },
           { name: "Fails", value: "1", inline: true },
         ],
@@ -449,6 +591,11 @@ async function processDueRow(client, row) {
 
   const reason = "Verification deadline missed (second failure).";
   try {
+    log.info(
+      `[verify-poller] ban user=${row.user_id} fails=${row.verify_fails} ` +
+        `hasVerified=${hasRole(member, config.roleVerifiedId)} ` +
+        `hasJailed=${hasRole(member, config.roleJailId)}`
+    );
     await guild.members.ban(row.user_id, { reason });
     await queries.setBanned(db, {
       guildId: row.guild_id,
@@ -469,6 +616,7 @@ async function processDueRow(client, row) {
       description: `${member.user.tag} missed verification deadline twice.`,
       color: 0xe53935,
       fields: [
+        { name: "User", value: `<@${row.user_id}>`, inline: true },
         { name: "User ID", value: row.user_id, inline: true },
         { name: "Fails", value: String(row.verify_fails + 1), inline: true },
       ],
@@ -511,6 +659,59 @@ module.exports = {
   initVerificationGate,
   handleMemberAdd,
   handleMemberUpdate,
+  suppressVerification,
+  getProtectedNameSet,
+  isImpersonation,
+  intermentMember: async (member, actorTag) => {
+    if (!db) throw new Error("DB not initialized");
+    await member.roles.set([config.roleJailId], "Automated interment.");
+    await queries.setJailed(db, {
+      guildId: member.guild.id,
+      userId: member.id,
+      at: Date.now(),
+    });
+    await queries.logModeration(db, {
+      guildId: member.guild.id,
+      userId: member.id,
+      action: "interment",
+      status: "success",
+      details: actorTag ? `actor=${actorTag}` : null,
+      at: Date.now(),
+    });
+  },
+  clearRulesReactionById: async (guild, userId) => {
+    if (!db) throw new Error("DB not initialized");
+    const rulesConfig = queries.getRulesMessage(db, { guildId: guild.id });
+    if (!rulesConfig) return;
+
+    let channel;
+    try {
+      channel = await guild.client.channels.fetch(rulesConfig.channel_id);
+    } catch {
+      return;
+    }
+    if (!channel || !channel.isTextBased()) return;
+
+    let message;
+    try {
+      message = await channel.messages.fetch(rulesConfig.message_id);
+    } catch {
+      return;
+    }
+
+    const reaction = message.reactions.cache.find(
+      (r) => r.emoji?.name === config.rulesEmoji
+    );
+    if (!reaction) return;
+
+    try {
+      const users = await reaction.users.fetch();
+      if (!users.has(userId)) return;
+      await reaction.users.remove(userId);
+    } catch {
+      // ignore failures
+    }
+  },
   resetFailsForUser: async (guildId, userId, actorTag) => {
     if (!db) throw new Error("DB not initialized");
 

@@ -55,7 +55,7 @@ If you see noisy transactions you don’t want alerts for, use \`/ignore-spam-tx
 - Confirmation that a noisy transaction (or pattern) is ignored.
 - Cleaner alert stream going forward.`,
   },
-  { type: "images", files: ["ignore-scam-tx.png"] },
+  { type: "images", files: ["ignore-spam-tx.png"] },
   {
     type: "text",
     content: `## 5) Daily heartbeat summary
@@ -67,19 +67,18 @@ Once per day, the bot sends a summary DM with the current state of your tracked 
 - Risk tiers and status markers for quick scanning.
 - Key signals without needing to run commands.`,
   },
-  { type: "images", files: ["dailyHeartbeat.png"] },
+  { type: "images", files: ["daily-heartbeat.png"] },
   {
     type: "text",
     content: `## 6) Monitor active alerts
 
-When risk conditions change, the bot posts alerts and updates.
+You are a monkey boy.
 
 **What to expect:**
-- Initial alert when a position enters a risk tier.
-- Follow-up updates as conditions change.
-- Resolution notice when the risk clears.`,
+- JoJo !!!!.
+- Follow-up updates as conditions change.`,
   },
-  { type: "images", files: ["alert-update.png", "alert-resolved.png"] },
+  { type: "images", files: ["alert-improving.png", "alert-worsening.png"] },
 ];
 
 module.exports = { quickStartBlocks };

@@ -34,6 +34,14 @@ async function onMessageReactionAdd(reaction, user) {
   }
 
   if (member.roles.cache.has(config.roleVerifiedId)) return;
+  if (member.roles.cache.has(config.roleJailId)) {
+    try {
+      await reaction.users.remove(user.id);
+    } catch (err) {
+      log.warn(`Failed to remove rules reaction for jailed user ${user.id}.`, err);
+    }
+    return;
+  }
   try {
     await member.roles.add(config.roleVerifiedId, "Accepted rules reaction.");
     if (member.roles.cache.has(config.roleInitiateId)) {
