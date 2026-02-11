@@ -58,9 +58,14 @@ async function isProtectedId(guildId, userId) {
 
 async function getProtectedNameSet(guildId) {
   const exactNames = new Set();
-  const rows = await getActiveProtectedPrincipals(guildId);
-  for (const row of rows) {
+  const principalRows = await getActiveProtectedPrincipals(guildId);
+  for (const row of principalRows) {
     const normalized = normalizeName(row.current_name);
+    if (normalized) exactNames.add(normalized);
+  }
+  const aliasRows = queries.getActiveProtectedAliases(db, guildId);
+  for (const row of aliasRows) {
+    const normalized = normalizeName(row.alias_name);
     if (normalized) exactNames.add(normalized);
   }
   return exactNames;
@@ -521,6 +526,34 @@ function formatProtectedNameWithId(row, fallbackName) {
   return `${name} (${userId})`;
 }
 
+function buildDuplicateNameEntries(principalRows, aliasRows) {
+  const entries = [];
+
+  for (const row of principalRows) {
+    const normalized = normalizeName(row.current_name);
+    if (!normalized) continue;
+    entries.push({
+      normalized,
+      user_id: row.user_id,
+      current_name: row.current_name,
+      created_at: row.created_at,
+    });
+  }
+
+  for (const row of aliasRows) {
+    const normalized = normalizeName(row.alias_name);
+    if (!normalized) continue;
+    entries.push({
+      normalized,
+      user_id: row.user_id,
+      current_name: row.alias_name,
+      created_at: row.created_at,
+    });
+  }
+
+  return entries;
+}
+
 async function sendIssueAlert(client, issue) {
   log.warn(issue.warn);
   await sendAdminLog(client, {
@@ -611,21 +644,25 @@ async function runImpersonationHealthCheck(client) {
     };
   });
 
+  const activeAliasRows = queries.getActiveProtectedAliases(db, guild.id);
+  const nameEntries = buildDuplicateNameEntries(activeRows, activeAliasRows);
   const duplicateMap = new Map();
-  for (const row of activeRows) {
-    const key = normalizeName(row.current_name);
-    if (!key) continue;
-    const list = duplicateMap.get(key) || [];
-    list.push(row);
-    duplicateMap.set(key, list);
+  for (const entry of nameEntries) {
+    const list = duplicateMap.get(entry.normalized) || [];
+    list.push(entry);
+    duplicateMap.set(entry.normalized, list);
   }
 
-  const conflicts = Array.from(duplicateMap.entries()).filter(
-    ([, rows]) => rows.length > 1
-  );
+  const conflicts = Array.from(duplicateMap.entries()).filter(([, rows]) => {
+    const uniqueUserIds = new Set(rows.map((row) => row.user_id));
+    return uniqueUserIds.size > 1;
+  });
   const singles = new Map(
     Array.from(duplicateMap.entries())
-      .filter(([, rows]) => rows.length === 1)
+      .filter(([, rows]) => {
+        const uniqueUserIds = new Set(rows.map((row) => row.user_id));
+        return uniqueUserIds.size === 1;
+      })
       .map(([normalizedName, rows]) => [normalizedName, getCanonicalProtectedRow(rows)])
   );
 
@@ -650,8 +687,8 @@ async function runImpersonationHealthCheck(client) {
           },
           {
             name: "Users",
-            value: rows
-              .map((row) => `<@${row.user_id}> (${row.user_id})`)
+            value: Array.from(new Set(rows.map((row) => row.user_id)))
+              .map((userId) => `<@${userId}> (${userId})`)
               .join("\n")
               .slice(0, 1024),
           },
@@ -1005,15 +1042,15 @@ async function runProtectSweep(guild, protectedRow, actorTag) {
   const normalizedProtectedName = normalizeName(protectedName);
   if (!normalizedProtectedName) return [];
 
-  try {
-    await guild.members.fetch();
-  } catch (err) {
-    log.warn("[protect-sweep] failed to fetch full member list.", err);
-  }
-
   const activeRows = queries.getActiveProtectedPrincipals(db, guild.id);
   const protectedIds = new Set(activeRows.map((row) => row.user_id));
   const swept = [];
+
+  if (guild.members.cache.size < guild.memberCount) {
+    log.debug(
+      `[protect-sweep] cache-only scan ${guild.members.cache.size}/${guild.memberCount} members`
+    );
+  }
 
   for (const member of guild.members.cache.values()) {
     if (member.user?.bot) continue;
@@ -1206,6 +1243,82 @@ module.exports = {
     await runImpersonationHealthCheck(guild.client);
     return { row: protectedRow, swept };
   },
+  protectAlias: async (guild, userId, aliasName, actorTag, notes) => {
+    if (!db) throw new Error("DB not initialized");
+
+    const normalizedAlias = String(aliasName || "").trim();
+    if (!normalizedAlias) {
+      throw new Error("Alias name is required.");
+    }
+
+    const principal = queries.getProtectedPrincipal(db, {
+      guildId: guild.id,
+      userId,
+    });
+    if (!principal || !principal.active) {
+      throw new Error("Protect the user ID first with !protect before adding aliases.");
+    }
+
+    const now = Date.now();
+    queries.upsertProtectedAlias(db, {
+      guildId: guild.id,
+      userId,
+      aliasName: normalizedAlias,
+      active: 1,
+      addedBy: actorTag || null,
+      notes: notes || null,
+      at: now,
+    });
+    await queries.logModeration(db, {
+      guildId: guild.id,
+      userId,
+      action: "protect_alias",
+      status: "success",
+      details: actorTag ? `actor=${actorTag}` : null,
+      at: now,
+    });
+
+    const swept = await runProtectSweep(
+      guild,
+      { user_id: userId, current_name: normalizedAlias },
+      actorTag
+    );
+    if (swept.length > 0) {
+      await sendAdminLog(guild.client, {
+        title: "Protection Sweep Interment",
+        description:
+          "Non-protected users already using a newly protected alias were interred.",
+        color: 0xff5722,
+        fields: [
+          {
+            name: "Protected Name",
+            value: `${normalizedAlias} (${userId})`,
+            inline: true,
+          },
+          {
+            name: "Users",
+            value: swept
+              .map((row) => `<@${row.userId}> (${row.userId})`)
+              .join("\n")
+              .slice(0, 1024),
+          },
+        ],
+      });
+      log.warn(
+        `[protect-sweep] interred ${swept.length} user(s) for protected alias "${normalizedAlias}"`
+      );
+    }
+
+    await runImpersonationHealthCheck(guild.client);
+    return {
+      row: queries.getProtectedAlias(db, {
+        guildId: guild.id,
+        userId,
+        aliasName: normalizedAlias,
+      }),
+      swept,
+    };
+  },
   unprotectPrincipal: async (guild, userId, actorTag, notes) => {
     if (!db) throw new Error("DB not initialized");
 
@@ -1234,9 +1347,58 @@ module.exports = {
     await runImpersonationHealthCheck(guild.client);
     return queries.getProtectedPrincipal(db, { guildId: guild.id, userId });
   },
+  unprotectAlias: async (guild, userId, aliasName, actorTag, notes) => {
+    if (!db) throw new Error("DB not initialized");
+
+    const normalizedAlias = String(aliasName || "").trim();
+    if (!normalizedAlias) {
+      throw new Error("Alias name is required.");
+    }
+
+    const result = queries.deleteProtectedAlias(db, {
+      guildId: guild.id,
+      userId,
+      aliasName: normalizedAlias,
+    });
+    const now = Date.now();
+    await queries.logModeration(db, {
+      guildId: guild.id,
+      userId,
+      action: "unprotect_alias",
+      status: result?.changes > 0 ? "success" : "nochange",
+      details:
+        (actorTag ? `actor=${actorTag};` : "") + `alias=${normalizedAlias}`,
+      at: now,
+    });
+    await runImpersonationHealthCheck(guild.client);
+    return result?.changes || 0;
+  },
+  unprotectAllAliasesForUser: async (guild, userId, actorTag, notes) => {
+    if (!db) throw new Error("DB not initialized");
+
+    const now = Date.now();
+    const result = queries.deleteProtectedAliasesForUser(db, {
+      guildId: guild.id,
+      userId,
+    });
+    await queries.logModeration(db, {
+      guildId: guild.id,
+      userId,
+      action: "unprotect_aliases_all",
+      status: result?.changes > 0 ? "success" : "nochange",
+      details: actorTag ? `actor=${actorTag}` : null,
+      at: now,
+    });
+    await runImpersonationHealthCheck(guild.client);
+    return result?.changes || 0;
+  },
   listProtectedPrincipals: async (guildId) => {
     if (!db) throw new Error("DB not initialized");
     return queries.getProtectedPrincipals(db, guildId);
+  },
+  listProtectedAliases: async (guildId) => {
+    if (!db) throw new Error("DB not initialized");
+    return queries.getProtectedAliases(db, guildId);
   },
   isProtectedPrincipalId: async (guildId, userId) => {
     if (!db) throw new Error("DB not initialized");

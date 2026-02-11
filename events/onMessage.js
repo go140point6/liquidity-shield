@@ -23,8 +23,12 @@ const {
   setQuickStartConfig,
   setJailedForUser,
   protectPrincipal,
+  protectAlias,
+  unprotectAlias,
+  unprotectAllAliasesForUser,
   unprotectPrincipal,
   listProtectedPrincipals,
+  listProtectedAliases,
 } = require("../services/verificationGate");
 
 function extractUserId(token) {
@@ -49,6 +53,19 @@ function extractChannelId(token) {
   if (match) return match[1];
   if (/^\d{17,20}$/.test(token)) return token;
   return null;
+}
+
+function parseAliasAndNotes(rawArgs) {
+  const raw = (rawArgs || []).join(" ").trim();
+  if (!raw) return { alias: "", notes: null };
+  const marker = " --notes ";
+  const idx = raw.toLowerCase().indexOf(marker);
+  if (idx === -1) {
+    return { alias: raw.trim(), notes: null };
+  }
+  const alias = raw.slice(0, idx).trim();
+  const notes = raw.slice(idx + marker.length).trim() || null;
+  return { alias, notes };
 }
 
 function overwritesMatch(a, b) {
@@ -564,6 +581,96 @@ async function onMessage(message) {
     }
   }
 
+  if (command === "!protect-alias") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    const userId = extractUserId(args[0]);
+    if (!userId) {
+      await message.reply(
+        "Usage: `!protect-alias <userId|@mention> <alias name> [--notes your note]`"
+      );
+      return;
+    }
+
+    const { alias, notes } = parseAliasAndNotes(args.slice(1));
+    if (!alias) {
+      await message.reply(
+        "Usage: `!protect-alias <userId|@mention> <alias name> [--notes your note]`"
+      );
+      return;
+    }
+
+    try {
+      const { swept } = await protectAlias(
+        message.guild,
+        userId,
+        alias,
+        message.author?.tag,
+        notes
+      );
+      let reply = `✅ Protected alias added for <@${userId}>: "${alias}"`;
+      if (Array.isArray(swept) && swept.length > 0) {
+        reply += `\n⚠️ Protection sweep interred ${swept.length} matching user(s).`;
+      }
+      await message.reply(reply);
+    } catch (err) {
+      log.error("protect-alias command failed.", err);
+      await message.reply("❌ Failed to add protected alias. Check logs.");
+    }
+  }
+
+  if (command === "!unprotect-aliases" || command === "!unprotect-alias") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    const userId = extractUserId(args[0]);
+    if (!userId) {
+      await message.reply(
+        "Usage: `!unprotect-aliases <userId|@mention> [alias name] [--notes your note]`"
+      );
+      return;
+    }
+
+    const { alias, notes } = parseAliasAndNotes(args.slice(1));
+
+    try {
+      if (alias) {
+        const removed = await unprotectAlias(
+          message.guild,
+          userId,
+          alias,
+          message.author?.tag,
+          notes
+        );
+        await message.reply(
+          removed > 0
+            ? `✅ Protected alias removed for <@${userId}>: "${alias}"`
+            : `ℹ️ Alias not found for <@${userId}>: "${alias}"`
+        );
+      } else {
+        const changes = await unprotectAllAliasesForUser(
+          message.guild,
+          userId,
+          message.author?.tag,
+          notes
+        );
+        await message.reply(
+          changes > 0
+            ? `✅ Removed ${changes} protected alias(es) for <@${userId}>.`
+            : `ℹ️ No protected aliases found for <@${userId}>.`
+        );
+      }
+    } catch (err) {
+      log.error("unprotect-aliases command failed.", err);
+      await message.reply("❌ Failed to disable protected alias. Check logs.");
+    }
+  }
+
   if (command === "!protected") {
     if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
       await message.reply("❌ You do not have permission to use this command.");
@@ -605,6 +712,46 @@ async function onMessage(message) {
     }
   }
 
+  if (command === "!protected-aliases" || command === "!protected-alias") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    try {
+      const rows = await listProtectedAliases(message.guild.id);
+      if (!rows.length) {
+        await message.reply("ℹ️ No protected aliases found.");
+        return;
+      }
+
+      const lines = rows.map((row) => {
+        const status = row.active ? "ACTIVE" : "INACTIVE";
+        const addedBy = row.added_by || "(unknown)";
+        const notes = row.notes || "(none)";
+        return `• ${status} | ${row.user_id} | alias="${row.alias_name}" | by="${addedBy}" | notes="${notes}"`;
+      });
+
+      const chunks = [];
+      let current = "**Protected Aliases**\n";
+      for (const line of lines) {
+        if ((current + line + "\n").length > 1900) {
+          chunks.push(current);
+          current = "";
+        }
+        current += `${line}\n`;
+      }
+      if (current.trim()) chunks.push(current);
+
+      for (const chunk of chunks) {
+        await message.reply(chunk);
+      }
+    } catch (err) {
+      log.error("protected-aliases command failed.", err);
+      await message.reply("❌ Failed to list protected aliases. Check logs.");
+    }
+  }
+
   if (command === "!help") {
     const lines = [
       "**Liquidity Shield Commands**",
@@ -628,8 +775,11 @@ async function onMessage(message) {
       "",
       "__Protection__",
       "`!protect` — Add or reactivate a protected ID.",
+      "`!protect-alias` — Add an alias name to a protected ID.",
       "`!unprotect` — Deactivate a protected ID.",
+      "`!unprotect-aliases` — Remove one or all aliases for a protected ID.",
       "`!protected` — List active/inactive protected IDs and metadata.",
+      "`!protected-aliases` — List stored protected aliases.",
       "",
       "__Moderation__",
       "`!ban` — Ban a user and delete 7 days of messages (or use `save`).",

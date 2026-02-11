@@ -144,6 +144,21 @@ Usage:
 
 Required permission: `Manage Server`
 
+## !protect-alias
+
+Adds or re-activates a protected alias name tied to a protected Discord ID.
+Use this for known alternate display names (for example names used in other
+servers). This also runs an immediate sweep and inters matching non-protected
+users already in the server.
+
+Usage:
+
+```
+!protect-alias <userId|@mention> <alias name> [--notes your note]
+```
+
+Required permission: `Manage Server`
+
 ## !unprotect
 
 Marks a protected Discord ID as inactive (kept in history).
@@ -152,6 +167,21 @@ Usage:
 
 ```
 !unprotect <userId|@mention> [notes]
+```
+
+Required permission: `Manage Server`
+
+## !unprotect-aliases
+
+Removes aliases for a protected Discord ID.
+- If you provide an alias name, only that alias row is removed.
+- If you provide only user ID/mention, all alias rows for that user are removed.
+
+Usage:
+
+```
+!unprotect-aliases <userId|@mention> <alias name> [--notes your note]
+!unprotect-aliases <userId|@mention> [--notes your note]
 ```
 
 Required permission: `Manage Server`
@@ -165,6 +195,19 @@ Usage:
 
 ```
 !protected
+```
+
+Required permission: `Manage Server`
+
+## !protected-aliases
+
+Lists protected alias rows currently stored, including owner ID, who added the
+alias, and notes.
+
+Usage:
+
+```
+!protected-aliases
 ```
 
 Required permission: `Manage Server`
