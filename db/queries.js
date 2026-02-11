@@ -68,6 +68,26 @@ function initSchema(db) {
       last_index INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS protected_principals (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      current_name TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      added_by TEXT,
+      notes TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (guild_id, user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_protected_principals_active
+      ON protected_principals (guild_id, active);
+
+    CREATE TABLE IF NOT EXISTS alert_throttle (
+      key TEXT PRIMARY KEY,
+      last_sent_at INTEGER NOT NULL
+    );
   `);
 }
 
@@ -423,6 +443,149 @@ function resetFails(db, { guildId, userId, at }) {
   return result?.changes || 0;
 }
 
+function upsertProtectedPrincipal(
+  db,
+  { guildId, userId, currentName, active, addedBy, notes, at }
+) {
+  db.prepare(
+    `
+    INSERT INTO protected_principals (
+      guild_id,
+      user_id,
+      current_name,
+      active,
+      added_by,
+      notes,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+      current_name = excluded.current_name,
+      active = excluded.active,
+      added_by = excluded.added_by,
+      notes = excluded.notes,
+      updated_at = excluded.updated_at
+  `
+  ).run(
+    guildId,
+    userId,
+    currentName || null,
+    active ? 1 : 0,
+    addedBy || null,
+    notes || null,
+    at,
+    at
+  );
+}
+
+function updateProtectedPrincipalName(db, { guildId, userId, currentName, at }) {
+  db.prepare(
+    `
+    UPDATE protected_principals
+    SET current_name = ?, updated_at = ?
+    WHERE guild_id = ? AND user_id = ?
+  `
+  ).run(currentName || null, at, guildId, userId);
+}
+
+function getProtectedPrincipals(db, guildId) {
+  return db
+    .prepare(
+      `
+    SELECT guild_id, user_id, current_name, active, added_by, notes, created_at, updated_at
+    FROM protected_principals
+    WHERE guild_id = ?
+    ORDER BY active DESC, updated_at DESC
+  `
+    )
+    .all(guildId);
+}
+
+function getProtectedPrincipal(db, { guildId, userId }) {
+  return db
+    .prepare(
+      `
+    SELECT guild_id, user_id, current_name, active, added_by, notes, created_at, updated_at
+    FROM protected_principals
+    WHERE guild_id = ? AND user_id = ?
+    LIMIT 1
+  `
+    )
+    .get(guildId, userId);
+}
+
+function getActiveProtectedPrincipals(db, guildId) {
+  return db
+    .prepare(
+      `
+    SELECT guild_id, user_id, current_name, active, added_by, notes, created_at, updated_at
+    FROM protected_principals
+    WHERE guild_id = ? AND active = 1
+    ORDER BY updated_at DESC
+  `
+    )
+    .all(guildId);
+}
+
+function isActiveProtectedPrincipal(db, { guildId, userId }) {
+  const row = db
+    .prepare(
+      `
+    SELECT 1 AS found
+    FROM protected_principals
+    WHERE guild_id = ? AND user_id = ? AND active = 1
+    LIMIT 1
+  `
+    )
+    .get(guildId, userId);
+  return Boolean(row?.found);
+}
+
+function getAlertThrottle(db, key) {
+  return db
+    .prepare(
+      `
+    SELECT key, last_sent_at
+    FROM alert_throttle
+    WHERE key = ?
+  `
+    )
+    .get(key);
+}
+
+function setAlertThrottle(db, { key, at }) {
+  db.prepare(
+    `
+    INSERT INTO alert_throttle (key, last_sent_at)
+    VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      last_sent_at = excluded.last_sent_at
+  `
+  ).run(key, at);
+}
+
+function getAlertThrottleByPrefix(db, prefix) {
+  return db
+    .prepare(
+      `
+    SELECT key, last_sent_at
+    FROM alert_throttle
+    WHERE key LIKE ?
+  `
+    )
+    .all(`${prefix}%`);
+}
+
+function deleteAlertThrottle(db, key) {
+  db.prepare(
+    `
+    DELETE FROM alert_throttle
+    WHERE key = ?
+  `
+  ).run(key);
+}
+
 module.exports = {
   initSchema,
   upsertPending,
@@ -447,6 +610,16 @@ module.exports = {
   deleteExpiredMessageCache,
   getMessageCacheByAuthorSince,
   setStatus,
+  upsertProtectedPrincipal,
+  updateProtectedPrincipalName,
+  getProtectedPrincipal,
+  getProtectedPrincipals,
+  getActiveProtectedPrincipals,
+  isActiveProtectedPrincipal,
+  getAlertThrottle,
+  setAlertThrottle,
+  getAlertThrottleByPrefix,
+  deleteAlertThrottle,
   getWelcomeState,
   setWelcomeState,
 };

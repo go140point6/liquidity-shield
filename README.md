@@ -1,92 +1,101 @@
 # Liquidity Shield
 
-A **Discord.js v14 verification gate** that tracks verification failures in SQLite and enforces kick/ban rules on a restart-safe schedule.
+Liquidity Shield is a purpose-built moderation bot for Discord servers that need
+strict access control, impersonation defense, and clear admin visibility.
 
-Core behavior:
-- On join, the bot starts a verification deadline.
-- If the member gains the Minion role before the deadline, it resets failures.
-- If the member is Penitent (jailed), it skips action.
-- If the deadline hits with no Minion role:
-  - First failure: kick.
-  - Second failure: ban.
-
-The deadline check runs on a DB-backed polling loop so it survives restarts.
+<img src="img/liquidity-shield.png" alt="liquidity shield bot" width="600">
 
 ---
 
-## Requirements
+## What Shield does
 
-- **Node.js 18+**
-- A Discord application and bot token
+Shield combines selected moderation behaviors into one custom workflow:
 
-This project includes a `.nvmrc` file. If you use nvm, run:
-
-```bash
-nvm use
-```
-
-Set the .nvmrc file to your major Node version (i.e. 24, 22, 20, or minimum 18).
-Tested on Node 20 and 24, .nvmrc is currently set to 24.
+- **Verification gate** with deadline enforcement (kick on first miss, ban on second).
+- **Interment system** (Penitent role) for hard isolation instead of standard timeout flow.
+- **Rules reaction access** (react to gain verified access, unreact removes access).
+- **Channel content publishing/editing** for rules, FAQ, and quick-start posts.
+- **Protected identity controls** using protected Discord IDs and live name checks.
+- **Admin action logging** for edits/deletes/bulk deletes, joins/leaves/kicks/bans, and key moderation events.
+- **Evidence-aware ban flow** with cached message/attachment references for review.
 
 ---
 
-## Installation
+## Command surface
 
-Clone the repository and install dependencies:
+Shield uses `!` prefixed admin commands for setup and moderation workflows.
 
-```bash
-npm install
-```
+<img src="img/mod-commands.png" alt="moderation commands screenshot" width="760">
 
-Create your environment file:
+### Content setup
 
-```bash
-cp .env-template .env
-```
+- `!postrules`, `!editrules`
+- `!postfaq`, `!editfaq`
+- `!postqs`, `!editqs`
 
-Fill in the required values in `.env`.
+### Permission and role operations
 
-Start the bot:
+- `!copyroleperms`
+- `!copychannelperms`
+- `!elevate`
+- `!reassign`
 
-```bash
-node index.js
-```
+### Moderation actions
 
-RECOMMENDED: Use pm2 or another process manager for production.
+- `!interment`
+- `!ban`
+- `!resetfails`
 
----
+### Protected identity management
 
-## Environment configuration
+- `!protect`
+- `!unprotect`
+- `!protected`
 
-All required configuration is provided via environment variables.
+### Utility
 
-At minimum, you must set:
-- `BOT_TOKEN`
-- `GUILD_ID`
-- `ROLE_VERIFIED_ID`
-- `ROLE_JAIL_ID`
-- `ADMIN_LOG_CHANNEL_ID`
-- `VERIFY_TIMEOUT_MIN`
-- `POLL_INTERVAL_SEC`
+- `!help`
 
-See `.env-template` for the full list.
+For exact syntax and permissions, see:
+`docs/ADMIN-COMMANDS.md`
 
 ---
 
-## Logging
+## Core systems
 
-This template uses a **custom lightweight logger** instead of raw `console.*`.
+### Verification gate
 
-Features include:
-- Log levels (`STARTUP`, `ERROR`, `WARN`, `INFO`, `DEBUG`)
-- Always-visible startup confirmation
-- Optional ANSI color output
-- Single-point verbosity control via `.env`
+On join, Shield starts a verification deadline. Members who verify in time are
+cleared. Members who miss are escalated: first miss kicks, second miss bans.
+State is stored in SQLite and processed by a restart-safe poller.
 
-Full documentation:
-```
-./docs/LOGGER.md
-```
+### Interment and role isolation
+
+Interment strips normal roles and assigns only the Penitent role, keeping users
+contained to designated channels until manually reassigned.
+
+### Protected names and impersonation defense
+
+Protected identities are ID-based (DB-backed). Shield monitors display/global
+name changes and join-time matches. Non-protected users impersonating protected
+names are automatically interred.
+
+### Protection conflict monitoring
+
+Shield checks for protected-name conflicts, alerts admins, and notifies protected
+staff when conflicts appear. Repeated alerts are throttled to reduce noise.
+
+### Managed channel content
+
+Shield can post and update pinned operational content in designated channels,
+including rules, FAQ, and quick-start guides, so setup docs stay consistent and
+editable through command workflow.
+
+### Moderation logging and evidence
+
+Shield posts structured moderation logs to admin channels, including message
+edit/delete activity and enforcement actions, so you can audit what happened and
+why.
 
 ---
 

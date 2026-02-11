@@ -22,6 +22,9 @@ const {
   getQuickStartConfig,
   setQuickStartConfig,
   setJailedForUser,
+  protectPrincipal,
+  unprotectPrincipal,
+  listProtectedPrincipals,
 } = require("../services/verificationGate");
 
 function extractUserId(token) {
@@ -108,7 +111,17 @@ async function onMessage(message) {
       return;
     }
 
+    const force = args[0]?.toLowerCase() === "force";
+
     try {
+      const existing = getRulesConfig(message.guild.id);
+      if (existing && !force) {
+        await message.reply(
+          "ℹ️ Rules post already exists. Use `!editrules` or `!postrules force`."
+        );
+        return;
+      }
+
       const channel = await message.client.channels.fetch(config.rulesChannelId);
       if (!channel || !channel.isTextBased()) {
         await message.reply("❌ Rules channel is missing or not text-based.");
@@ -179,7 +192,17 @@ async function onMessage(message) {
       return;
     }
 
+    const force = args[0]?.toLowerCase() === "force";
+
     try {
+      const existing = getFaqConfig(message.guild.id);
+      if (existing && !force) {
+        await message.reply(
+          "ℹ️ FAQ post already exists. Use `!editfaq` or `!postfaq force`."
+        );
+        return;
+      }
+
       const channel = await message.client.channels.fetch(config.faqChannelId);
       if (!channel || !channel.isTextBased()) {
         await message.reply("❌ FAQ channel is missing or not text-based.");
@@ -486,23 +509,134 @@ async function onMessage(message) {
     }
   }
 
+  if (command === "!protect") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    const userId = extractUserId(args[0]);
+    if (!userId) {
+      await message.reply("Usage: `!protect <userId|@mention> [notes]`");
+      return;
+    }
+
+    const notes = args.slice(1).join(" ").trim() || null;
+    try {
+      const { row, swept } = await protectPrincipal(
+        message.guild,
+        userId,
+        message.author?.tag,
+        notes
+      );
+      let reply = 
+        `✅ Protected ID added: <@${userId}> (${userId})` +
+        `${row?.current_name ? ` name="${row.current_name}"` : ""}`;
+      if (Array.isArray(swept) && swept.length > 0) {
+        reply += `\n⚠️ Protection sweep interred ${swept.length} matching user(s).`;
+      }
+      await message.reply(reply);
+    } catch (err) {
+      log.error("protect command failed.", err);
+      await message.reply("❌ Failed to protect user ID. Check logs.");
+    }
+  }
+
+  if (command === "!unprotect") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    const userId = extractUserId(args[0]);
+    if (!userId) {
+      await message.reply("Usage: `!unprotect <userId|@mention> [notes]`");
+      return;
+    }
+
+    const notes = args.slice(1).join(" ").trim() || null;
+    try {
+      await unprotectPrincipal(message.guild, userId, message.author?.tag, notes);
+      await message.reply(`✅ Protected ID disabled: <@${userId}> (${userId})`);
+    } catch (err) {
+      log.error("unprotect command failed.", err);
+      await message.reply("❌ Failed to unprotect user ID. Check logs.");
+    }
+  }
+
+  if (command === "!protected") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageGuild)) {
+      await message.reply("❌ You do not have permission to use this command.");
+      return;
+    }
+
+    try {
+      const rows = await listProtectedPrincipals(message.guild.id);
+      if (!rows.length) {
+        await message.reply("ℹ️ No protected IDs found.");
+        return;
+      }
+
+      const lines = rows.map((row) => {
+        const status = row.active ? "ACTIVE" : "INACTIVE";
+        const name = row.current_name || "(none)";
+        const addedBy = row.added_by || "(unknown)";
+        const notes = row.notes || "(none)";
+        return `• ${status} | ${row.user_id} | name="${name}" | by="${addedBy}" | notes="${notes}"`;
+      });
+
+      const chunks = [];
+      let current = "**Protected IDs**\n";
+      for (const line of lines) {
+        if ((current + line + "\n").length > 1900) {
+          chunks.push(current);
+          current = "";
+        }
+        current += `${line}\n`;
+      }
+      if (current.trim()) chunks.push(current);
+
+      for (const chunk of chunks) {
+        await message.reply(chunk);
+      }
+    } catch (err) {
+      log.error("protected command failed.", err);
+      await message.reply("❌ Failed to list protected IDs. Check logs.");
+    }
+  }
+
   if (command === "!help") {
     const lines = [
       "**Liquidity Shield Commands**",
       "",
-      "`!copychannelperms` — Copy channel overwrites from one role to another.",
-      "`!copyroleperms` — Copy base permissions from one role to another.",
-      "`!ban` — Ban a user and delete 7 days of messages (or use `save`).",
+      "__Content Setup__",
+      "`!postrules` — Post the rules and save its message ID.",
+      "`!editrules` — Edit the stored rules post.",
       "`!postfaq` — Post the FAQ and save its message ID.",
       "`!editfaq` — Edit the stored FAQ post.",
       "`!postqs` — Post the quick-start message set.",
       "`!editqs` — Re-post the quick-start messages.",
-      "`!postrules` — Post the rules and save its message ID.",
-      "`!editrules` — Edit the stored rules post.",
+      "",
+      "__Permission Copying__",
+      "`!copychannelperms` — Copy channel overwrites from one role to another.",
+      "`!copyroleperms` — Copy base permissions from one role to another.",
+      "",
+      "__Role Actions__",
       "`!elevate` — Set a user's role to one target role (humans only).",
       "`!reassign` — Set a user's role to one target role (humans only).",
       "`!interment` — Strip roles and assign Penitent.",
+      "",
+      "__Protection__",
+      "`!protect` — Add or reactivate a protected ID.",
+      "`!unprotect` — Deactivate a protected ID.",
+      "`!protected` — List active/inactive protected IDs and metadata.",
+      "",
+      "__Moderation__",
+      "`!ban` — Ban a user and delete 7 days of messages (or use `save`).",
       "`!resetfails` — Reset a user's verification fail count.",
+      "",
+      "__General__",
+      "`!help` — Show this command list.",
     ];
 
     await message.reply(lines.join("\n"));
@@ -514,7 +648,17 @@ async function onMessage(message) {
       return;
     }
 
+    const force = args[0]?.toLowerCase() === "force";
+
     try {
+      const existing = getQuickStartConfig(message.guild.id);
+      if (existing && !force) {
+        await message.reply(
+          "ℹ️ Quick-start post already exists. Use `!editqs` or `!postqs force`."
+        );
+        return;
+      }
+
       const channel = await message.client.channels.fetch(
         config.quickStartChannelId
       );

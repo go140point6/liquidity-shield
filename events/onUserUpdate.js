@@ -1,12 +1,12 @@
 // ./events/onUserUpdate.js
 const log = require("../utils/logger");
 const { config } = require("../config/botConfig");
-const { protectedIds } = require("../config/protectedIds");
 const { sendAdminLog } = require("../utils/adminLog");
 const {
-  getProtectedNameSet,
   isImpersonation,
+  isProtectedPrincipalId,
   intermentMember,
+  runImpersonationHealthCheck,
 } = require("../services/verificationGate");
 
 async function onUserUpdate(oldUser, newUser, client) {
@@ -16,7 +16,7 @@ async function onUserUpdate(oldUser, newUser, client) {
   const oldName = (oldUser.globalName || oldUser.username || "").trim();
   const newName = (newUser.globalName || newUser.username || "").trim();
   if (oldName === newName) return;
-  if (protectedIds.includes(newUser.id)) return;
+  const protectedId = await isProtectedPrincipalId(config.guildId, newUser.id);
 
   let guild;
   try {
@@ -33,11 +33,16 @@ async function onUserUpdate(oldUser, newUser, client) {
     return;
   }
 
-  if (member.roles.cache.has(config.roleJailId)) return;
-  if (config.protectedRoleIds.some((id) => member.roles.cache.has(id))) return;
+  const hasProtectedRole = config.protectedRoleIds.some((id) =>
+    member.roles.cache.has(id)
+  );
+  if (hasProtectedRole || protectedId) {
+    await runImpersonationHealthCheck(client);
+  }
 
-  const protectedSet = getProtectedNameSet(guild);
-  if (!isImpersonation(newName, protectedSet, newUser.id)) return;
+  if (member.roles.cache.has(config.roleJailId)) return;
+  if (protectedId) return;
+  if (!(await isImpersonation(guild.id, newName, newUser.id))) return;
 
   await intermentMember(member, "impersonation-global");
 
