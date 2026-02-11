@@ -1,8 +1,6 @@
 // ./services/verificationGate.js
 const { config } = require("../config/botConfig");
 const { welcomeMessages } = require("../config/welcomeMessages");
-const { protectedNames } = require("../config/protectedNames");
-const { protectedIds } = require("../config/protectedIds");
 const log = require("../utils/logger");
 const { sendAdminLog } = require("../utils/adminLog");
 const { openDb } = require("../db/db");
@@ -11,7 +9,11 @@ const queries = require("../db/queries");
 
 let db = null;
 let poller = null;
+let impersonationHealthPoller = null;
 const suppressedVerification = new Map();
+const DUPLICATE_ALERT_DM_THROTTLE_MS = 4 * 60 * 60 * 1000;
+const IMPERSONATION_HEALTH_INTERVAL_MS = 5 * 60 * 1000;
+const ISSUE_ALERT_THROTTLE_MS = 4 * 60 * 60 * 1000;
 
 function suppressVerification(userId, ttlMs = 60000) {
   suppressedVerification.set(userId, Date.now() + ttlMs);
@@ -33,37 +35,43 @@ function hasRole(member, roleId) {
 
 function normalizeName(name) {
   if (!name) return "";
-  return name.toLowerCase();
+  return name.trim().toLowerCase();
 }
 
-function getProtectedNameSet(guild) {
+function getMemberCheckName(member) {
+  return (
+    member.displayName ||
+    member.nickname ||
+    member.user?.globalName ||
+    member.user?.username ||
+    ""
+  );
+}
+
+async function getActiveProtectedPrincipals(guildId) {
+  return queries.getActiveProtectedPrincipals(db, guildId);
+}
+
+async function isProtectedId(guildId, userId) {
+  return queries.isActiveProtectedPrincipal(db, { guildId, userId });
+}
+
+async function getProtectedNameSet(guildId) {
   const exactNames = new Set();
-  for (const roleId of config.protectedRoleIds) {
-    const role = guild.roles.cache.get(roleId);
-    if (!role) continue;
-    for (const member of role.members.values()) {
-      if (member.displayName) exactNames.add(member.displayName);
-    }
+  const rows = await getActiveProtectedPrincipals(guildId);
+  for (const row of rows) {
+    const normalized = normalizeName(row.current_name);
+    if (normalized) exactNames.add(normalized);
   }
-
-  for (const name of protectedNames) {
-    if (name) exactNames.add(name);
-  }
-
-  return { exactNames };
+  return exactNames;
 }
 
-function isImpersonation(targetName, protectedSet, memberId) {
-  if (protectedIds.includes(memberId)) return false;
-  const raw = (targetName || "").trim().toLowerCase();
+async function isImpersonation(guildId, targetName, memberId) {
+  if (await isProtectedId(guildId, memberId)) return false;
+  const raw = normalizeName(targetName);
   if (!raw) return false;
-
-  for (const name of protectedSet.exactNames) {
-    if (!name) continue;
-    if (raw === name.trim().toLowerCase()) return true;
-  }
-
-  return false;
+  const protectedNamesSet = await getProtectedNameSet(guildId);
+  return protectedNamesSet.has(raw);
 }
 
 function isUnknownMemberError(err) {
@@ -74,6 +82,8 @@ async function initVerificationGate(client) {
   db = await openDb(config.dbPath);
   await queries.initSchema(db);
   initMessageCacheDb(db);
+  await runImpersonationHealthCheck(client);
+  startImpersonationHealthPoller(client);
   startPoller(client);
 }
 
@@ -96,10 +106,8 @@ async function handleMemberAdd(member) {
     return;
   }
 
-  const protectedSet = getProtectedNameSet(member.guild);
-  const joinName =
-    member.displayName || member.nickname || member.user?.username || "";
-  if (isImpersonation(joinName, protectedSet, member.id)) {
+  const joinName = getMemberCheckName(member);
+  if (await isImpersonation(member.guild.id, joinName, member.id)) {
     await applyJailOnJoin(member);
     await sendAdminLog(member.client, {
       title: "Impersonation Detected (Join)",
@@ -401,6 +409,325 @@ async function applyJailOnJoin(member) {
   }
 }
 
+async function fetchCurrentProtectedName(guild, userId) {
+  try {
+    const member = await guild.members.fetch(userId);
+    return getMemberCheckName(member);
+  } catch {
+    // fall back to user fetch
+  }
+
+  try {
+    const user = await guild.client.users.fetch(userId);
+    return (user.globalName || user.username || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function refreshActiveProtectedPrincipalNames(guild) {
+  const rows = await queries.getActiveProtectedPrincipals(db, guild.id);
+  const refreshed = [];
+
+  for (const row of rows) {
+    const currentName = await fetchCurrentProtectedName(guild, row.user_id);
+    if (
+      currentName &&
+      normalizeName(currentName) !== normalizeName(row.current_name || "")
+    ) {
+      queries.updateProtectedPrincipalName(db, {
+        guildId: guild.id,
+        userId: row.user_id,
+        currentName,
+        at: Date.now(),
+      });
+      row.current_name = currentName;
+    }
+    refreshed.push(row);
+  }
+
+  return refreshed;
+}
+
+function getProtectedRoleMembers(guild) {
+  const members = new Map();
+
+  for (const roleId of config.protectedRoleIds) {
+    const role = guild.roles.cache.get(roleId);
+    if (!role) {
+      log.warn(`[impersonation] protected role missing in guild: ${roleId}`);
+      continue;
+    }
+
+    for (const member of role.members.values()) {
+      members.set(member.id, member);
+    }
+  }
+
+  return Array.from(members.values());
+}
+
+async function maybeSendThrottledDuplicateDm(guild, name, rows) {
+  const now = Date.now();
+  const throttleKey = `protected_name_conflict_dm:${guild.id}:${name}`;
+  const lastSent = queries.getAlertThrottle(db, throttleKey);
+  if (
+    lastSent?.last_sent_at &&
+    now - Number(lastSent.last_sent_at) < DUPLICATE_ALERT_DM_THROTTLE_MS
+  ) {
+    return;
+  }
+
+  queries.setAlertThrottle(db, { key: throttleKey, at: now });
+
+  const protectedRoleMembers = getProtectedRoleMembers(guild);
+  if (protectedRoleMembers.length === 0) return;
+
+  const canonical = getCanonicalProtectedRow(rows);
+  const displayName = canonical?.current_name || name;
+  const conflictSummary = `${displayName}: ${rows
+    .map((row) => row.user_id)
+    .join(", ")}`;
+
+  const dmText =
+    "Liquidity Shield alert: duplicate protected names detected.\n\n" +
+    conflictSummary.slice(0, 1700);
+
+  for (const member of protectedRoleMembers) {
+    try {
+      await member.send(dmText);
+    } catch (err) {
+      log.warn(
+        `[impersonation] failed DM alert to ${member.user?.tag || member.id}.`,
+        err
+      );
+    }
+  }
+}
+
+function getCanonicalProtectedRow(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  return [...rows].sort((a, b) => {
+    const aCreated = Number(a.created_at || 0);
+    const bCreated = Number(b.created_at || 0);
+    if (aCreated !== bCreated) return aCreated - bCreated;
+    return String(a.user_id || "").localeCompare(String(b.user_id || ""));
+  })[0];
+}
+
+function formatProtectedNameWithId(row, fallbackName) {
+  const name = row?.current_name || fallbackName || "unknown";
+  const userId = row?.user_id || "unknown";
+  return `${name} (${userId})`;
+}
+
+async function sendIssueAlert(client, issue) {
+  log.warn(issue.warn);
+  await sendAdminLog(client, {
+    title: issue.title,
+    description: issue.description,
+    color: issue.color || 0xff9800,
+    fields: issue.fields || [],
+  });
+}
+
+async function maybeSendIssueAlert(client, issueKey, issue) {
+  const now = Date.now();
+  const last = queries.getAlertThrottle(db, issueKey);
+  if (last?.last_sent_at && now - Number(last.last_sent_at) < ISSUE_ALERT_THROTTLE_MS) {
+    return false;
+  }
+
+  queries.setAlertThrottle(db, { key: issueKey, at: now });
+  await sendIssueAlert(client, issue);
+  return true;
+}
+
+async function resolveInactiveIssues(client, prefix, activeKeys, resolver) {
+  const existing = queries.getAlertThrottleByPrefix(db, prefix);
+  for (const row of existing) {
+    if (activeKeys.has(row.key)) continue;
+    const issue = resolver(row.key);
+    if (!issue) {
+      queries.deleteAlertThrottle(db, row.key);
+      continue;
+    }
+    await sendIssueAlert(client, issue);
+    queries.deleteAlertThrottle(db, row.key);
+  }
+}
+
+async function runImpersonationHealthCheck(client) {
+  if (!db) return;
+
+  let guild;
+  try {
+    guild = await client.guilds.fetch(config.guildId);
+  } catch (err) {
+    log.warn("[impersonation] failed to fetch guild for health check.", err);
+    return;
+  }
+
+  try {
+    await guild.roles.fetch();
+  } catch (err) {
+    log.warn("[impersonation] failed to refresh role cache for health check.", err);
+  }
+
+  const activeRows = await refreshActiveProtectedPrincipalNames(guild);
+  const activeIdSet = new Set(activeRows.map((row) => row.user_id));
+
+  const missingPrefix = `impersonation_missing_protected_id:${guild.id}:`;
+  const activeMissingKeys = new Set();
+  const protectedRoleMembers = getProtectedRoleMembers(guild).filter(
+    (member) => !member.user?.bot
+  );
+  for (const member of protectedRoleMembers) {
+    if (activeIdSet.has(member.id)) continue;
+
+    const issueKey = `${missingPrefix}${member.id}`;
+    activeMissingKeys.add(issueKey);
+    await maybeSendIssueAlert(client, issueKey, {
+      warn: `[impersonation] protected-role member missing protected ID: ${member.user.tag} (${member.id})`,
+      title: "Protected Role Missing ID Protection",
+      description:
+        "A protected-role member is not in the protected principals table.",
+      color: 0xff9800,
+      fields: [
+        { name: "User", value: `<@${member.id}>`, inline: true },
+        { name: "User ID", value: member.id, inline: true },
+      ],
+    });
+  }
+  await resolveInactiveIssues(client, missingPrefix, activeMissingKeys, (issueKey) => {
+    const memberId = issueKey.slice(missingPrefix.length);
+    if (!memberId) return null;
+    return {
+      warn: `[impersonation] resolved: protected-role member now has protected ID (${memberId})`,
+      title: "Protected Role Coverage Resolved",
+      description: "A protected-role member missing ID protection has been resolved.",
+      color: 0x4caf50,
+      fields: [{ name: "User ID", value: memberId, inline: true }],
+    };
+  });
+
+  const duplicateMap = new Map();
+  for (const row of activeRows) {
+    const key = normalizeName(row.current_name);
+    if (!key) continue;
+    const list = duplicateMap.get(key) || [];
+    list.push(row);
+    duplicateMap.set(key, list);
+  }
+
+  const conflicts = Array.from(duplicateMap.entries()).filter(
+    ([, rows]) => rows.length > 1
+  );
+  const singles = new Map(
+    Array.from(duplicateMap.entries())
+      .filter(([, rows]) => rows.length === 1)
+      .map(([normalizedName, rows]) => [normalizedName, getCanonicalProtectedRow(rows)])
+  );
+
+  const duplicatePrefix = `impersonation_duplicate_name:${guild.id}:`;
+  const activeDuplicateKeys = new Set();
+
+  if (conflicts.length > 0) {
+    for (const [name, rows] of conflicts) {
+      const canonical = getCanonicalProtectedRow(rows);
+      const issueKey = `${duplicatePrefix}${name}`;
+      activeDuplicateKeys.add(issueKey);
+      const sent = await maybeSendIssueAlert(client, issueKey, {
+        warn: `[impersonation] duplicate protected name detected: ${name}`,
+        title: "Protected Name Conflict",
+        description: "Multiple protected IDs currently share the same name.",
+        color: 0xf44336,
+        fields: [
+          {
+            name: "Protected Name",
+            value: formatProtectedNameWithId(canonical, name),
+            inline: true,
+          },
+          {
+            name: "Users",
+            value: rows
+              .map((row) => `<@${row.user_id}> (${row.user_id})`)
+              .join("\n")
+              .slice(0, 1024),
+          },
+        ],
+      });
+
+      if (sent) {
+        await maybeSendThrottledDuplicateDm(guild, name, rows);
+      }
+    }
+  }
+  await resolveInactiveIssues(
+    client,
+    duplicatePrefix,
+    activeDuplicateKeys,
+    (issueKey) => {
+      const name = issueKey.slice(duplicatePrefix.length);
+      if (!name) return null;
+      const single = singles.get(name) || null;
+      return {
+        warn: `[impersonation] resolved: duplicate protected name cleared (${name})`,
+        title: "Protected Name Conflict Resolved",
+        description: "A duplicate protected name conflict has been resolved.",
+        color: 0x4caf50,
+        fields: [
+          {
+            name: "Protected Name",
+            value: formatProtectedNameWithId(single, name),
+            inline: true,
+          },
+          {
+            name: "User",
+            value: formatProtectedNameWithId(single, name),
+            inline: true,
+          },
+        ],
+      };
+    }
+  );
+
+  const activeDmKeys = new Set(
+    Array.from(activeDuplicateKeys).map((issueKey) => {
+      const name = issueKey.slice(duplicatePrefix.length);
+      return `protected_name_conflict_dm:${guild.id}:${name}`;
+    })
+  );
+  const existingDmThrottle = queries.getAlertThrottleByPrefix(
+    db,
+    `protected_name_conflict_dm:${guild.id}:`
+  );
+  for (const row of existingDmThrottle) {
+    if (activeDmKeys.has(row.key)) continue;
+    queries.deleteAlertThrottle(db, row.key);
+  }
+}
+
+function startImpersonationHealthPoller(client) {
+  if (impersonationHealthPoller) return impersonationHealthPoller;
+
+  let running = false;
+  const runCycle = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await runImpersonationHealthCheck(client);
+    } catch (err) {
+      log.error("Impersonation health poller failed.", err);
+    } finally {
+      running = false;
+    }
+  };
+
+  impersonationHealthPoller = setInterval(runCycle, IMPERSONATION_HEALTH_INTERVAL_MS);
+  return impersonationHealthPoller;
+}
+
 function startPoller(client) {
   if (poller) return poller;
 
@@ -655,6 +982,59 @@ async function handleActionError(client, row, action, err) {
   });
 }
 
+async function intermentMemberImpl(member, actorTag) {
+  await member.roles.set([config.roleJailId], "Automated interment.");
+  const now = Date.now();
+  await queries.setJailed(db, {
+    guildId: member.guild.id,
+    userId: member.id,
+    at: now,
+  });
+  await queries.logModeration(db, {
+    guildId: member.guild.id,
+    userId: member.id,
+    action: "interment",
+    status: "success",
+    details: actorTag ? `actor=${actorTag}` : null,
+    at: now,
+  });
+}
+
+async function runProtectSweep(guild, protectedRow, actorTag) {
+  const protectedName = protectedRow?.current_name || "";
+  const normalizedProtectedName = normalizeName(protectedName);
+  if (!normalizedProtectedName) return [];
+
+  try {
+    await guild.members.fetch();
+  } catch (err) {
+    log.warn("[protect-sweep] failed to fetch full member list.", err);
+  }
+
+  const activeRows = queries.getActiveProtectedPrincipals(db, guild.id);
+  const protectedIds = new Set(activeRows.map((row) => row.user_id));
+  const swept = [];
+
+  for (const member of guild.members.cache.values()) {
+    if (member.user?.bot) continue;
+    if (member.id === protectedRow.user_id) continue;
+    if (protectedIds.has(member.id)) continue;
+    if (member.roles.cache.has(config.roleJailId)) continue;
+
+    const currentName = getMemberCheckName(member);
+    if (normalizeName(currentName) !== normalizedProtectedName) continue;
+
+    await intermentMemberImpl(member, actorTag ? `${actorTag}:protect-sweep` : "protect-sweep");
+    swept.push({
+      userId: member.id,
+      tag: member.user?.tag || member.id,
+      name: currentName || "(none)",
+    });
+  }
+
+  return swept;
+}
+
 module.exports = {
   initVerificationGate,
   handleMemberAdd,
@@ -662,22 +1042,10 @@ module.exports = {
   suppressVerification,
   getProtectedNameSet,
   isImpersonation,
+  runImpersonationHealthCheck,
   intermentMember: async (member, actorTag) => {
     if (!db) throw new Error("DB not initialized");
-    await member.roles.set([config.roleJailId], "Automated interment.");
-    await queries.setJailed(db, {
-      guildId: member.guild.id,
-      userId: member.id,
-      at: Date.now(),
-    });
-    await queries.logModeration(db, {
-      guildId: member.guild.id,
-      userId: member.id,
-      action: "interment",
-      status: "success",
-      details: actorTag ? `actor=${actorTag}` : null,
-      at: Date.now(),
-    });
+    await intermentMemberImpl(member, actorTag);
   },
   clearRulesReactionById: async (guild, userId) => {
     if (!db) throw new Error("DB not initialized");
@@ -782,5 +1150,96 @@ module.exports = {
       details: actorTag ? `actor=${actorTag}` : null,
       at: now,
     });
+  },
+  protectPrincipal: async (guild, userId, actorTag, notes) => {
+    if (!db) throw new Error("DB not initialized");
+
+    const now = Date.now();
+    const currentName = await fetchCurrentProtectedName(guild, userId);
+    queries.upsertProtectedPrincipal(db, {
+      guildId: guild.id,
+      userId,
+      currentName: currentName || null,
+      active: 1,
+      addedBy: actorTag || null,
+      notes: notes || null,
+      at: now,
+    });
+    await queries.logModeration(db, {
+      guildId: guild.id,
+      userId,
+      action: "protect_principal",
+      status: "success",
+      details: actorTag ? `actor=${actorTag}` : null,
+      at: now,
+    });
+    const protectedRow = queries.getProtectedPrincipal(db, {
+      guildId: guild.id,
+      userId,
+    });
+    const swept = await runProtectSweep(guild, protectedRow, actorTag);
+    if (swept.length > 0) {
+      await sendAdminLog(guild.client, {
+        title: "Protection Sweep Interment",
+        description:
+          "Non-protected users already using a newly protected name were interred.",
+        color: 0xff5722,
+        fields: [
+          {
+            name: "Protected Name",
+            value: `${protectedRow?.current_name || "(none)"} (${userId})`,
+            inline: true,
+          },
+          {
+            name: "Users",
+            value: swept
+              .map((row) => `<@${row.userId}> (${row.userId})`)
+              .join("\n")
+              .slice(0, 1024),
+          },
+        ],
+      });
+      log.warn(
+        `[protect-sweep] interred ${swept.length} user(s) for protected name "${protectedRow?.current_name || "(none)"}"`
+      );
+    }
+    await runImpersonationHealthCheck(guild.client);
+    return { row: protectedRow, swept };
+  },
+  unprotectPrincipal: async (guild, userId, actorTag, notes) => {
+    if (!db) throw new Error("DB not initialized");
+
+    const now = Date.now();
+    const existing = queries.getProtectedPrincipal(db, {
+      guildId: guild.id,
+      userId,
+    });
+    queries.upsertProtectedPrincipal(db, {
+      guildId: guild.id,
+      userId,
+      currentName: existing?.current_name || null,
+      active: 0,
+      addedBy: actorTag || null,
+      notes: notes || null,
+      at: now,
+    });
+    await queries.logModeration(db, {
+      guildId: guild.id,
+      userId,
+      action: "unprotect_principal",
+      status: "success",
+      details: actorTag ? `actor=${actorTag}` : null,
+      at: now,
+    });
+    await runImpersonationHealthCheck(guild.client);
+    return queries.getProtectedPrincipal(db, { guildId: guild.id, userId });
+  },
+  listProtectedPrincipals: async (guildId) => {
+    if (!db) throw new Error("DB not initialized");
+    return queries.getProtectedPrincipals(db, guildId);
+  },
+  isProtectedPrincipalId: async (guildId, userId) => {
+    if (!db) throw new Error("DB not initialized");
+    return queries.isActiveProtectedPrincipal(db, { guildId, userId });
   },
 };

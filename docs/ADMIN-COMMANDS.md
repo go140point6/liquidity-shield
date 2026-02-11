@@ -22,10 +22,14 @@ Required permission: `Ban Members`
 Posts the rules message in the configured rules channel and saves the message
 ID so it can be edited later.
 
+If a stored rules message already exists, this command is blocked unless you add
+`force`.
+
 Usage:
 
 ```
 !postrules
+!postrules force
 ```
 
 Required permission: `Manage Server`
@@ -48,10 +52,14 @@ Required permission: `Manage Server`
 Posts the FAQ message in the configured FAQ channel and saves the message ID so
 it can be edited later.
 
+If a stored FAQ message already exists, this command is blocked unless you add
+`force`.
+
 Usage:
 
 ```
 !postfaq
+!postfaq force
 ```
 
 Required permission: `Manage Server`
@@ -86,10 +94,14 @@ Required permission: `Ban Members`
 Posts the quick-start message set in the configured channel and saves message
 IDs so it can be re-posted later.
 
+If a stored quick-start post already exists, this command is blocked unless you
+add `force`.
+
 Usage:
 
 ```
 !postqs
+!postqs force
 ```
 
 Required permission: `Manage Server`
@@ -116,6 +128,46 @@ Usage:
 ```
 !help
 ```
+
+## !protect
+
+Adds or re-activates a protected Discord ID used by impersonation checks.
+Shield stores the user ID, current known name, who added it, and optional
+notes. It also runs an immediate sweep for non-protected members already using
+that protected name and inters them.
+
+Usage:
+
+```
+!protect <userId|@mention> [notes]
+```
+
+Required permission: `Manage Server`
+
+## !unprotect
+
+Marks a protected Discord ID as inactive (kept in history).
+
+Usage:
+
+```
+!unprotect <userId|@mention> [notes]
+```
+
+Required permission: `Manage Server`
+
+## !protected
+
+Lists all protected IDs (active and inactive), including stored name, who added
+the entry, and notes.
+
+Usage:
+
+```
+!protected
+```
+
+Required permission: `Manage Server`
 
 ## Moderation Logs
 

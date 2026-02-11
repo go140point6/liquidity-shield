@@ -1,13 +1,14 @@
 // ./events/onGuildMemberUpdate.js
 const log = require("../utils/logger");
 const { config } = require("../config/botConfig");
-const { protectedIds } = require("../config/protectedIds");
 const {
-  getProtectedNameSet,
   isImpersonation,
+  isProtectedPrincipalId,
+  handleMemberUpdate,
+  intermentMember,
+  runImpersonationHealthCheck,
 } = require("../services/verificationGate");
 const { sendAdminLog } = require("../utils/adminLog");
-const { handleMemberUpdate, intermentMember } = require("../services/verificationGate");
 
 async function onGuildMemberUpdate(oldMember, newMember) {
   try {
@@ -41,6 +42,7 @@ async function onGuildMemberUpdate(oldMember, newMember) {
     }
 
     await handleImpersonationCheck(oldMember, newMember);
+    await maybeRunProtectedHealthCheck(oldMember, newMember);
 
     const oldTimeout = oldMember.communicationDisabledUntilTimestamp || 0;
     const newTimeout = newMember.communicationDisabledUntilTimestamp || 0;
@@ -104,15 +106,13 @@ async function onGuildMemberUpdate(oldMember, newMember) {
 async function handleImpersonationCheck(oldMember, newMember) {
   if (newMember.user?.bot) return;
   if (newMember.roles.cache.has(config.roleJailId)) return;
-  if (config.protectedRoleIds.some((id) => newMember.roles.cache.has(id))) return;
-  if (protectedIds.includes(newMember.id)) return;
+  if (await isProtectedPrincipalId(newMember.guild.id, newMember.id)) return;
 
   const oldName = oldMember.displayName || oldMember.user?.username || "";
   const newName = newMember.displayName || newMember.user?.username || "";
   if (oldName === newName) return;
 
-  const protectedSet = getProtectedNameSet(newMember.guild);
-  if (!isImpersonation(newName, protectedSet, newMember.id)) return;
+  if (!(await isImpersonation(newMember.guild.id, newName, newMember.id))) return;
 
   await intermentMember(newMember, "impersonation");
 
@@ -132,6 +132,20 @@ async function handleImpersonationCheck(oldMember, newMember) {
       newName || "(none)"
     }`
   );
+}
+
+async function maybeRunProtectedHealthCheck(oldMember, newMember) {
+  const oldName = oldMember.displayName || oldMember.user?.username || "";
+  const newName = newMember.displayName || newMember.user?.username || "";
+  if (oldName === newName) return;
+
+  const hasProtectedRole = config.protectedRoleIds.some((id) =>
+    newMember.roles.cache.has(id)
+  );
+  const protectedId = await isProtectedPrincipalId(newMember.guild.id, newMember.id);
+  if (!hasProtectedRole && !protectedId) return;
+
+  await runImpersonationHealthCheck(newMember.client);
 }
 
 module.exports = { onGuildMemberUpdate };

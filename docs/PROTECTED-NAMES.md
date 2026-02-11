@@ -1,89 +1,83 @@
-# Protected Names & IDs
+# Protected IDs and Name Protection
 
-This system prevents impersonation by automatically interning users who match
-protected names or protected identities. It protects staff and allied projects
-from look‑alike display names.
+Shield now uses a **DB-first protected principal model**.
 
-## What is protected
+`config/protectedNames.js` and `config/protectedIds.js` are no longer used.
 
-Protection uses three sources:
+## Core model
 
-1. **Protected Roles**  
-   Any member who has a role listed in `PROTECTED_ROLE_IDS` is protected. Their
-   **username, nickname, and display name** are added to the protected set.
+- A protected identity is a Discord user ID in `protected_principals`.
+- Each record stores:
+  - `user_id`
+  - `current_name` (latest known name)
+  - `active` (`1` or `0`)
+  - `added_by`
+  - `notes`
+  - timestamps
+- Impersonation matching is **exact name match only** (case-insensitive).
 
-2. **Protected Names** (`config/protectedNames.js`)  
-   A manual list of names/variants to protect (e.g., display names, usernames,
-   or known impersonation patterns).
+## Commands
 
-3. **Protected IDs** (`config/protectedIds.js`)  
-   A manual list of trusted Discord user IDs. These users are **exempt** from
-   interment even if their names match protected names.
+### `!protect`
 
-## How matching works
-
-Matching is currently **exact display‑name only**:
-
-- The check uses the member’s **display name** (nickname if set, otherwise display name).
-- A match requires an **exact** (case‑insensitive) string match.
-- No normalization, no leetspeak mapping, and no prefix/suffix matching.
-
-This is intentionally strict to avoid false positives.
-
-## When it triggers
-
-Impersonation checks run:
-
-- **On join** (if the user arrives with a protected/impersonating name)
-- **On nickname/display name change**
-
-If a match is found and the user is not exempt, the bot:
-
-1. Clears any timeout
-2. Strips roles
-3. Assigns the Penitent role (interment)
-4. Logs the action to admin‑log with old → new name
-
-## Configuration
-
-### .env
+Adds or re-activates a protected ID.
+Also performs an immediate sweep for non-protected members already using that
+protected name and moves matches to interment.
 
 ```
-PROTECTED_ROLE_IDS=roleId1,roleId2,roleId3
+!protect <userId|@mention> [notes]
 ```
 
-### config/protectedNames.js
+### `!unprotect`
 
-Add any names or variants you want protected:
+Marks a protected ID as inactive (history retained).
 
-```js
-const protectedNames = [
-  "go140point6",
-  "g0140point6",
-  "DISH ♾",
-  "dishxnet",
-];
+```
+!unprotect <userId|@mention> [notes]
 ```
 
-### config/protectedIds.js
+### `!protected`
 
-Add trusted user IDs that should never be interred for name matches:
+Lists active and inactive protected records.
 
-```js
-const protectedIds = [
-  "905444143503921192",
-];
+```
+!protected
 ```
 
-## Notes
+## Runtime behavior
 
-- Protected roles are the safest baseline. Use protected names for extra
-  coverage, and protected IDs for exemption of trusted users.
-- The system is intentionally strict: if a non‑protected user matches, they are
-  interred immediately.
+- On join, Shield checks the joining member name against active protected names.
+- On nickname/display-name change, Shield checks the new name again.
+- On global profile name change (`UserUpdate`), Shield also checks.
+- If a non-protected user matches a protected name exactly, Shield inters them.
 
-## Future: Light Variations
+## Name source updates
 
-If you want to catch `_name`, `.name_`, or leetspeak variants later, we can
-add a **toggle** for normalized matching with careful safeguards to avoid false
-positives.
+Shield refreshes `current_name` for active protected IDs during periodic health
+checks:
+
+- Uses guild display name when available.
+- Falls back to global/profile name when needed.
+
+This keeps protected names current without manual name list maintenance.
+
+## Protected role coverage alerts
+
+`PROTECTED_ROLE_IDS` is now an **audit source**, not the protection source.
+
+- If someone in a protected role is missing from the protected ID table,
+  Shield logs warnings and posts admin-log alerts until fixed.
+
+## Duplicate protected name alerts
+
+If two active protected IDs currently have the same name:
+
+- Shield logs warnings and posts an admin-log alert every check cycle.
+- Shield DMs members in protected roles on first detection.
+- Duplicate DM alerts are throttled to once every 4 hours while unresolved.
+
+## Optional future hardening
+
+- Add explicit alias support per protected ID (manual variants).
+- Add toggleable normalized matching for targeted names only.
+- Add command for forced name refresh of one protected ID.

@@ -15,10 +15,13 @@ Use the \`/my-wallets\` command to add a wallet address you want the bot to trac
 **What you’ll do:**
 - Add a wallet address (optional label for easy recognition).
 - Confirm it shows as enabled.
+- Set LP alert behavior with the wallet-level flag controls.
+- Set your daily heartbeat delivery hour/timezone (and enable/disable heartbeat).
 
 **What you’ll see:**
 - The wallet listed with the label you chose.
-- Any detected positions tied to that wallet will appear over time.`,
+- Any detected positions tied to that wallet will appear over time.
+- Wallet controls for alert filtering and heartbeat scheduling.`,
   },
   { type: "images", files: ["my-wallets.png"] },
   {
@@ -65,17 +68,27 @@ Once per day, the bot sends a summary DM with the current state of your tracked 
 **What to expect:**
 - A clean overview of loans and LPs.
 - Risk tiers and status markers for quick scanning.
-- Key signals without needing to run commands.`,
+- Key signals without needing to run commands.
+- Delivery time based on your \`/my-wallets\` hour/timezone selection.`,
   },
   { type: "images", files: ["daily-heartbeat.png"] },
   {
     type: "text",
-    content: `## 6) Monitor active alerts
+    content: `## 6) Check redemption tiers
 
-You are a monkey boy.
+Use \`/redemption-rate\` to see current target rates and where your loan sits in redemption risk tiers.
 
 **What to expect:**
-- JoJo !!!!.
+- Current tier thresholds and practical guidance.
+- A quick way to understand how close your position is to risk boundaries.`,
+  },
+  { type: "images", files: ["redemption-rate.png"] },
+  {
+    type: "text",
+    content: `## 7) Monitor active alerts
+
+**What to expect:**
+- Alert updates when risk posture improves or worsens.
 - Follow-up updates as conditions change.`,
   },
   { type: "images", files: ["alert-improving.png", "alert-worsening.png"] },
