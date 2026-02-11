@@ -84,6 +84,21 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_protected_principals_active
       ON protected_principals (guild_id, active);
 
+    CREATE TABLE IF NOT EXISTS protected_aliases (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      alias_name TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      added_by TEXT,
+      notes TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (guild_id, user_id, alias_name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_protected_aliases_active
+      ON protected_aliases (guild_id, active, alias_name);
+
     CREATE TABLE IF NOT EXISTS alert_throttle (
       key TEXT PRIMARY KEY,
       last_sent_at INTEGER NOT NULL
@@ -542,6 +557,102 @@ function isActiveProtectedPrincipal(db, { guildId, userId }) {
   return Boolean(row?.found);
 }
 
+function upsertProtectedAlias(
+  db,
+  { guildId, userId, aliasName, active, addedBy, notes, at }
+) {
+  db.prepare(
+    `
+    INSERT INTO protected_aliases (
+      guild_id,
+      user_id,
+      alias_name,
+      active,
+      added_by,
+      notes,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(guild_id, user_id, alias_name) DO UPDATE SET
+      active = excluded.active,
+      added_by = excluded.added_by,
+      notes = excluded.notes,
+      updated_at = excluded.updated_at
+  `
+  ).run(
+    guildId,
+    userId,
+    aliasName,
+    active ? 1 : 0,
+    addedBy || null,
+    notes || null,
+    at,
+    at
+  );
+}
+
+function getProtectedAliases(db, guildId) {
+  return db
+    .prepare(
+      `
+    SELECT guild_id, user_id, alias_name, active, added_by, notes, created_at, updated_at
+    FROM protected_aliases
+    WHERE guild_id = ?
+    ORDER BY active DESC, updated_at DESC
+  `
+    )
+    .all(guildId);
+}
+
+function getActiveProtectedAliases(db, guildId) {
+  return db
+    .prepare(
+      `
+    SELECT guild_id, user_id, alias_name, active, added_by, notes, created_at, updated_at
+    FROM protected_aliases
+    WHERE guild_id = ? AND active = 1
+    ORDER BY updated_at DESC
+  `
+    )
+    .all(guildId);
+}
+
+function getProtectedAlias(db, { guildId, userId, aliasName }) {
+  return db
+    .prepare(
+      `
+    SELECT guild_id, user_id, alias_name, active, added_by, notes, created_at, updated_at
+    FROM protected_aliases
+    WHERE guild_id = ? AND user_id = ? AND alias_name = ?
+    LIMIT 1
+  `
+    )
+    .get(guildId, userId, aliasName);
+}
+
+function deleteProtectedAliasesForUser(db, { guildId, userId }) {
+  return db
+    .prepare(
+      `
+    DELETE FROM protected_aliases
+    WHERE guild_id = ? AND user_id = ?
+  `
+    )
+    .run(guildId, userId);
+}
+
+function deleteProtectedAlias(db, { guildId, userId, aliasName }) {
+  return db
+    .prepare(
+      `
+    DELETE FROM protected_aliases
+    WHERE guild_id = ? AND user_id = ? AND alias_name = ?
+  `
+    )
+    .run(guildId, userId, aliasName);
+}
+
 function getAlertThrottle(db, key) {
   return db
     .prepare(
@@ -616,6 +727,12 @@ module.exports = {
   getProtectedPrincipals,
   getActiveProtectedPrincipals,
   isActiveProtectedPrincipal,
+  upsertProtectedAlias,
+  getProtectedAlias,
+  getProtectedAliases,
+  getActiveProtectedAliases,
+  deleteProtectedAliasesForUser,
+  deleteProtectedAlias,
   getAlertThrottle,
   setAlertThrottle,
   getAlertThrottleByPrefix,

@@ -7,6 +7,8 @@ Shield now uses a **DB-first protected principal model**.
 ## Core model
 
 - A protected identity is a Discord user ID in `protected_principals`.
+- Optional alias names are stored in `protected_aliases` and tied to protected
+  IDs.
 - Each record stores:
   - `user_id`
   - `current_name` (latest known name)
@@ -36,12 +38,39 @@ Marks a protected ID as inactive (history retained).
 !unprotect <userId|@mention> [notes]
 ```
 
+### `!protect-alias`
+
+Adds or re-activates an alias name for a protected ID.
+
+```
+!protect-alias <userId|@mention> <alias name> [--notes your note]
+```
+
+### `!unprotect-aliases`
+
+Removes alias names for a protected ID.
+- Provide an alias name to remove only that alias row.
+- Omit alias name to remove all alias rows for that protected ID.
+
+```
+!unprotect-aliases <userId|@mention> <alias name> [--notes your note]
+!unprotect-aliases <userId|@mention> [--notes your note]
+```
+
 ### `!protected`
 
 Lists active and inactive protected records.
 
 ```
 !protected
+```
+
+### `!protected-aliases`
+
+Lists alias records currently stored.
+
+```
+!protected-aliases
 ```
 
 ## Runtime behavior
@@ -60,6 +89,8 @@ checks:
 - Falls back to global/profile name when needed.
 
 This keeps protected names current without manual name list maintenance.
+Aliases cover known alternate display names that cannot be discovered
+automatically (for example names used in other servers).
 
 ## Protected role coverage alerts
 
