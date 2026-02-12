@@ -14,6 +14,8 @@ async function onGuildMemberUpdate(oldMember, newMember) {
   try {
     await handleMemberUpdate(oldMember, newMember);
 
+    const oldDisplayName = oldMember.displayName || oldMember.user?.username || "(none)";
+    const newDisplayName = newMember.displayName || newMember.user?.username || "(none)";
     if (oldMember.nickname !== newMember.nickname) {
       await sendAdminLog(newMember.client, {
         title: "Nickname Changed",
@@ -38,6 +40,21 @@ async function onGuildMemberUpdate(oldMember, newMember) {
         `[nick] ${newMember.user.tag} ${oldMember.nickname || "(none)"} -> ${
           newMember.nickname || "(none)"
         }`
+      );
+    } else if (oldDisplayName !== newDisplayName) {
+      await sendAdminLog(newMember.client, {
+        title: "Server Display Name Changed",
+        description: `${newMember.user.tag} changed their server display name.`,
+        color: 0x607d8b,
+        fields: [
+          { name: "Before", value: oldDisplayName, inline: true },
+          { name: "After", value: newDisplayName, inline: true },
+          { name: "User", value: `<@${newMember.id}>`, inline: true },
+          { name: "User ID", value: newMember.id, inline: true },
+        ],
+      });
+      log.info(
+        `[display] ${newMember.user.tag} ${oldDisplayName} -> ${newDisplayName}`
       );
     }
 
@@ -106,7 +123,12 @@ async function onGuildMemberUpdate(oldMember, newMember) {
 async function handleImpersonationCheck(oldMember, newMember) {
   if (newMember.user?.bot) return;
   if (newMember.roles.cache.has(config.roleJailId)) return;
-  if (await isProtectedPrincipalId(newMember.guild.id, newMember.id)) return;
+  if (await isProtectedPrincipalId(newMember.guild.id, newMember.id)) {
+    log.debug(
+      `[impersonation-skip] protected principal id user=${newMember.user.tag} (${newMember.id})`
+    );
+    return;
+  }
 
   const oldName = oldMember.displayName || oldMember.user?.username || "";
   const newName = newMember.displayName || newMember.user?.username || "";

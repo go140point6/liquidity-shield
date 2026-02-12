@@ -16,7 +16,8 @@ Shield now uses a **DB-first protected principal model**.
   - `added_by`
   - `notes`
   - timestamps
-- Impersonation matching is **exact name match only** (case-insensitive).
+- Impersonation matching is **case-insensitive and whitespace-insensitive**.
+  Names must otherwise match exactly.
 
 ## Commands
 
@@ -78,7 +79,7 @@ Lists alias records currently stored.
 - On join, Shield checks the joining member name against active protected names.
 - On nickname/display-name change, Shield checks the new name again.
 - On global profile name change (`UserUpdate`), Shield also checks.
-- If a non-protected user matches a protected name exactly, Shield inters them.
+- If a non-protected user matches a protected name, Shield inters them.
 
 ## Name source updates
 
@@ -109,6 +110,5 @@ If two active protected IDs currently have the same name:
 
 ## Optional future hardening
 
-- Add explicit alias support per protected ID (manual variants).
-- Add toggleable normalized matching for targeted names only.
+- Add explicit alias grouping/tagging for operational organization.
 - Add command for forced name refresh of one protected ID.
