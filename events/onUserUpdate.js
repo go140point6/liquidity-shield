@@ -33,6 +33,23 @@ async function onUserUpdate(oldUser, newUser, client) {
     return;
   }
 
+  await sendAdminLog(client, {
+    title: "Global Display Name Changed",
+    description: `${newUser.tag} changed global display name.`,
+    color: 0x607d8b,
+    fields: [
+      { name: "Before", value: oldName || "*(none)*", inline: true },
+      { name: "After", value: newName || "*(none)*", inline: true },
+      { name: "User", value: `<@${newUser.id}>`, inline: true },
+      { name: "User ID", value: newUser.id, inline: true },
+    ],
+  });
+  log.info(
+    `[global-display] ${newUser.tag} ${oldName || "(none)"} -> ${
+      newName || "(none)"
+    }`
+  );
+
   const hasProtectedRole = config.protectedRoleIds.some((id) =>
     member.roles.cache.has(id)
   );
@@ -41,7 +58,12 @@ async function onUserUpdate(oldUser, newUser, client) {
   }
 
   if (member.roles.cache.has(config.roleJailId)) return;
-  if (protectedId) return;
+  if (protectedId) {
+    log.debug(
+      `[impersonation-skip] protected principal id user=${newUser.tag} (${newUser.id})`
+    );
+    return;
+  }
   if (!(await isImpersonation(guild.id, newName, newUser.id))) return;
 
   await intermentMember(member, "impersonation-global");

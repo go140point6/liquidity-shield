@@ -35,7 +35,7 @@ function hasRole(member, roleId) {
 
 function normalizeName(name) {
   if (!name) return "";
-  return name.trim().toLowerCase();
+  return name.trim().toLowerCase().replace(/\s+/gu, "");
 }
 
 function getMemberCheckName(member) {
