@@ -501,6 +501,9 @@ async function maybeSendThrottledDuplicateDm(guild, name, rows) {
   for (const member of protectedRoleMembers) {
     try {
       await member.send(dmText);
+      log.warn(
+        `[impersonation] conflict alert DM sent to ${member.user?.tag || member.id} for protected name "${displayName}"`
+      );
     } catch (err) {
       log.warn(
         `[impersonation] failed DM alert to ${member.user?.tag || member.id}.`,

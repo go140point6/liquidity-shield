@@ -15,6 +15,7 @@ function validateEnv() {
     "FAQ_CHANNEL_ID",
     "QUICKSTART_CHANNEL_ID",
     "WELCOME_CHANNEL_ID",
+    "CONTRACT_CHANNEL_ID",
     "ROLE_INITIATE_ID",
     "ROLE_AUTOMATA_ID",
     "VERIFY_TIMEOUT_MIN",
@@ -25,6 +26,8 @@ function validateEnv() {
     "MESSAGE_CACHE_DB_ENABLED",
     "MESSAGE_CACHE_DB_TTL_HOURS",
     "PROTECTED_ROLE_IDS",
+    "FAKE_TOKEN_ADDRESSES",
+    "FAKE_TOKEN_CHECK_TIMEOUT_MS",
   ];
 
   const missing = requiredVars.filter(
@@ -46,6 +49,7 @@ function validateEnv() {
     "MESSAGE_CACHE_MAX",
     "MESSAGE_CACHE_TTL_HOURS",
     "MESSAGE_CACHE_DB_TTL_HOURS",
+    "FAKE_TOKEN_CHECK_TIMEOUT_MS",
   ];
   for (const key of intVars) {
     const raw = process.env[key].trim();
