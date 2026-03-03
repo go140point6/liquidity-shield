@@ -30,6 +30,7 @@ const config = {
   faqChannelId: readEnv("FAQ_CHANNEL_ID"),
   quickStartChannelId: readEnv("QUICKSTART_CHANNEL_ID"),
   welcomeChannelId: readEnv("WELCOME_CHANNEL_ID"),
+  contractChannelId: readEnv("CONTRACT_CHANNEL_ID"),
   roleInitiateId: readEnv("ROLE_INITIATE_ID"),
   roleAutomataId: readEnv("ROLE_AUTOMATA_ID"),
   verifyTimeoutMs: readIntEnv("VERIFY_TIMEOUT_MIN") * 60 * 1000,
@@ -37,6 +38,8 @@ const config = {
   excludedChannelIds: parseCsvEnv("EXCLUDED_CHANNEL_IDS"),
   excludedCategoryIds: parseCsvEnv("EXCLUDED_CATEGORY_IDS"),
   protectedRoleIds: parseCsvEnv("PROTECTED_ROLE_IDS"),
+  fakeTokenAddressesUrl: readEnv("FAKE_TOKEN_ADDRESSES"),
+  fakeTokenCheckTimeoutMs: readIntEnv("FAKE_TOKEN_CHECK_TIMEOUT_MS"),
   dbPath: readEnv("DB_PATH"),
 };
 

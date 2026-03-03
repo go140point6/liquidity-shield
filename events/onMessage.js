@@ -10,6 +10,8 @@ const log = require("../utils/logger");
 const { sendAdminLog } = require("../utils/adminLog");
 const { setMessage, getRecentMessagesByAuthor } = require("../utils/messageCache");
 const { suppressBulkForUser } = require("../utils/modLogSuppress");
+const { normalizeContractAddress } = require("../utils/addresses");
+const { classifyAddress } = require("../utils/fakeTokenRegistry");
 const { suppressVerification, intermentMember } = require("../services/verificationGate");
 const { getDb } = require("../db/db");
 const { setStatus } = require("../db/queries");
@@ -76,11 +78,54 @@ function overwritesMatch(a, b) {
   );
 }
 
+function looksLikeAddressAttempt(content) {
+  if (!content) return false;
+  if (/^0x[0-9a-fA-F]*$/i.test(content)) return true;
+  if (/^xdc[0-9a-fA-F]*$/i.test(content)) return true;
+  return false;
+}
+
 async function onMessage(message) {
   if (message.author?.bot) return;
   if (!message.guild) return;
 
   setMessage(message);
+
+  if (message.channelId === config.contractChannelId) {
+    const content = (message.content || "").trim();
+    let normalizedAddress;
+    const isStrictAddress = /^0x[0-9a-fA-F]{40}$/.test(content);
+    if (!isStrictAddress) {
+      if (looksLikeAddressAttempt(content)) {
+        await message.reply("⛔ Invalid submission.");
+        return;
+      }
+      try {
+        await message.delete();
+      } catch (err) {
+        log.warn("Failed to delete non-contract message in contract channel.", err);
+      }
+      return;
+    }
+    try {
+      normalizedAddress = normalizeContractAddress("FLR", content);
+    } catch {
+      await message.reply("⛔ Invalid submission.");
+      return;
+    }
+
+    const verdict = await classifyAddress(normalizedAddress);
+    if (verdict === "fraud") {
+      await message.reply("🔒 Fraud registry match. Do not interact.");
+      return;
+    }
+    if (verdict === "clean") {
+      await message.reply("⚖️ No match found. No legitimacy implied.");
+      return;
+    }
+    await message.reply("⚠️ Classification unavailable.");
+    return;
+  }
 
   const content = message.content?.trim();
   if (!content || !content.startsWith("!")) return;
