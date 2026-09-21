@@ -8,17 +8,16 @@ function validateEnv() {
     "BOT_TOKEN",
     "GUILD_ID",
     "ROLE_VERIFIED_ID",
-    "ROLE_JAIL_ID",
     "ADMIN_LOG_CHANNEL_ID",
     "RULES_CHANNEL_ID",
     "RULES_EMOJI",
     "FAQ_CHANNEL_ID",
     "QUICKSTART_CHANNEL_ID",
     "WELCOME_CHANNEL_ID",
-    "CONTRACT_CHANNEL_ID",
     "ROLE_INITIATE_ID",
     "ROLE_AUTOMATA_ID",
     "VERIFY_TIMEOUT_MIN",
+    "MODERATION_TIMEOUT_MIN",
     "POLL_INTERVAL_SEC",
     "DB_PATH",
     "MESSAGE_CACHE_MAX",
@@ -26,8 +25,6 @@ function validateEnv() {
     "MESSAGE_CACHE_DB_ENABLED",
     "MESSAGE_CACHE_DB_TTL_HOURS",
     "PROTECTED_ROLE_IDS",
-    "FAKE_TOKEN_ADDRESSES",
-    "FAKE_TOKEN_CHECK_TIMEOUT_MS",
   ];
 
   const missing = requiredVars.filter(
@@ -45,11 +42,11 @@ function validateEnv() {
 
   const intVars = [
     "VERIFY_TIMEOUT_MIN",
+    "MODERATION_TIMEOUT_MIN",
     "POLL_INTERVAL_SEC",
     "MESSAGE_CACHE_MAX",
     "MESSAGE_CACHE_TTL_HOURS",
     "MESSAGE_CACHE_DB_TTL_HOURS",
-    "FAKE_TOKEN_CHECK_TIMEOUT_MS",
   ];
   for (const key of intVars) {
     const raw = process.env[key].trim();
@@ -58,6 +55,15 @@ function validateEnv() {
       log.error(`${key} must be a positive integer. Got: "${raw}"`);
       process.exit(1);
     }
+  }
+
+  const moderationTimeoutMinutes = Number.parseInt(
+    process.env.MODERATION_TIMEOUT_MIN.trim(),
+    10
+  );
+  if (moderationTimeoutMinutes > 28 * 24 * 60) {
+    log.error("MODERATION_TIMEOUT_MIN cannot exceed Discord's 28-day timeout limit.");
+    process.exit(1);
   }
 
   const dbEnabled = process.env.MESSAGE_CACHE_DB_ENABLED.trim().toLowerCase();

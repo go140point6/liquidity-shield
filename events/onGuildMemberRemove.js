@@ -67,11 +67,10 @@ async function onGuildMemberRemove(member) {
       suppressVerification(user.id, 120000);
       const db = getDb();
       if (db) {
-        const wasJailed = member.roles?.cache?.has(config.roleJailId);
         setStatus(db, {
           guildId: guild.id,
           userId: user.id,
-          status: wasJailed ? "jailed" : "kicked",
+          status: "kicked",
           at: Date.now(),
         });
       }
@@ -92,11 +91,10 @@ async function onGuildMemberRemove(member) {
     suppressVerification(user.id, 120000);
     const db = getDb();
     if (db) {
-      const wasJailed = member.roles?.cache?.has(config.roleJailId);
       setStatus(db, {
         guildId: guild.id,
         userId: user.id,
-        status: wasJailed ? "jailed" : "left",
+        status: "left",
         at: Date.now(),
       });
     }

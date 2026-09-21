@@ -5,7 +5,7 @@ const {
   isImpersonation,
   isProtectedPrincipalId,
   handleMemberUpdate,
-  intermentMember,
+  timeoutMember,
   runImpersonationHealthCheck,
 } = require("../services/verificationGate");
 const { sendAdminLog } = require("../utils/adminLog");
@@ -65,28 +65,6 @@ async function onGuildMemberUpdate(oldMember, newMember) {
     const newTimeout = newMember.communicationDisabledUntilTimestamp || 0;
     if (oldTimeout !== newTimeout) {
       if (newTimeout > Date.now()) {
-        try {
-          await newMember.timeout(null, "Converted timeout to interment.");
-        } catch (err) {
-          log.warn("Failed to clear timeout before interment.", err);
-        }
-
-        try {
-          await intermentMember(newMember, "timeout->interment");
-        } catch (err) {
-          log.error("Failed to inter users on timeout.", err);
-        }
-
-        await sendAdminLog(newMember.client, {
-          title: "Timeout Converted",
-          description: `${newMember.user.tag} timed out -> interment.`,
-          color: 0xffb300,
-          fields: [
-            { name: "User", value: `<@${newMember.id}>`, inline: true },
-            { name: "User ID", value: newMember.id, inline: true },
-          ],
-        });
-
         await sendAdminLog(newMember.client, {
           title: "Member Timed Out",
           description: `${newMember.user.tag} was timed out.`,
@@ -101,7 +79,7 @@ async function onGuildMemberUpdate(oldMember, newMember) {
             { name: "User ID", value: newMember.id, inline: true },
           ],
         });
-        log.info(`[timeout] ${newMember.user.tag} converted to interment`);
+        log.info(`[timeout] ${newMember.user.tag} until ${new Date(newTimeout).toISOString()}`);
       } else {
         await sendAdminLog(newMember.client, {
           title: "Timeout Cleared",
@@ -122,7 +100,6 @@ async function onGuildMemberUpdate(oldMember, newMember) {
 
 async function handleImpersonationCheck(oldMember, newMember) {
   if (newMember.user?.bot) return;
-  if (newMember.roles.cache.has(config.roleJailId)) return;
   if (await isProtectedPrincipalId(newMember.guild.id, newMember.id)) {
     log.debug(
       `[impersonation-skip] protected principal id user=${newMember.user.tag} (${newMember.id})`
@@ -136,11 +113,11 @@ async function handleImpersonationCheck(oldMember, newMember) {
 
   if (!(await isImpersonation(newMember.guild.id, newName, newMember.id))) return;
 
-  await intermentMember(newMember, "impersonation");
+  await timeoutMember(newMember, "Impersonation detected.");
 
   await sendAdminLog(newMember.client, {
     title: "Impersonation Detected",
-    description: `${newMember.user.tag} moved to interment.`,
+    description: `${newMember.user.tag} was timed out.`,
     color: 0xff5722,
     fields: [
       { name: "User", value: `<@${newMember.id}>`, inline: true },

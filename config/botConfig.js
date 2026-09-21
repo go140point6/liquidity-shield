@@ -1,5 +1,4 @@
 // ./config/botConfig.js
-const path = require("node:path");
 function readEnv(name) {
   return process.env[name]?.trim() || "";
 }
@@ -23,23 +22,20 @@ const config = {
   token: readEnv("BOT_TOKEN"),
   guildId: readEnv("GUILD_ID"),
   roleVerifiedId: readEnv("ROLE_VERIFIED_ID"),
-  roleJailId: readEnv("ROLE_JAIL_ID"),
   adminLogChannelId: readEnv("ADMIN_LOG_CHANNEL_ID"),
   rulesChannelId: readEnv("RULES_CHANNEL_ID"),
   rulesEmoji: readEnv("RULES_EMOJI"),
   faqChannelId: readEnv("FAQ_CHANNEL_ID"),
   quickStartChannelId: readEnv("QUICKSTART_CHANNEL_ID"),
   welcomeChannelId: readEnv("WELCOME_CHANNEL_ID"),
-  contractChannelId: readEnv("CONTRACT_CHANNEL_ID"),
   roleInitiateId: readEnv("ROLE_INITIATE_ID"),
   roleAutomataId: readEnv("ROLE_AUTOMATA_ID"),
   verifyTimeoutMs: readIntEnv("VERIFY_TIMEOUT_MIN") * 60 * 1000,
+  moderationTimeoutMs: readIntEnv("MODERATION_TIMEOUT_MIN") * 60 * 1000,
   pollIntervalMs: readIntEnv("POLL_INTERVAL_SEC") * 1000,
   excludedChannelIds: parseCsvEnv("EXCLUDED_CHANNEL_IDS"),
   excludedCategoryIds: parseCsvEnv("EXCLUDED_CATEGORY_IDS"),
   protectedRoleIds: parseCsvEnv("PROTECTED_ROLE_IDS"),
-  fakeTokenAddressesUrl: readEnv("FAKE_TOKEN_ADDRESSES"),
-  fakeTokenCheckTimeoutMs: readIntEnv("FAKE_TOKEN_CHECK_TIMEOUT_MS"),
   dbPath: readEnv("DB_PATH"),
 };
 

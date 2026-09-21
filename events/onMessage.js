@@ -10,9 +10,7 @@ const log = require("../utils/logger");
 const { sendAdminLog } = require("../utils/adminLog");
 const { setMessage, getRecentMessagesByAuthor } = require("../utils/messageCache");
 const { suppressBulkForUser } = require("../utils/modLogSuppress");
-const { normalizeContractAddress } = require("../utils/addresses");
-const { classifyAddress } = require("../utils/fakeTokenRegistry");
-const { suppressVerification, intermentMember } = require("../services/verificationGate");
+const { suppressVerification, timeoutMember } = require("../services/verificationGate");
 const { getDb } = require("../db/db");
 const { setStatus } = require("../db/queries");
 const {
@@ -23,7 +21,6 @@ const {
   setFaqConfig,
   getQuickStartConfig,
   setQuickStartConfig,
-  setJailedForUser,
   protectPrincipal,
   protectAlias,
   unprotectAlias,
@@ -78,54 +75,11 @@ function overwritesMatch(a, b) {
   );
 }
 
-function looksLikeAddressAttempt(content) {
-  if (!content) return false;
-  if (/^0x[0-9a-fA-F]*$/i.test(content)) return true;
-  if (/^xdc[0-9a-fA-F]*$/i.test(content)) return true;
-  return false;
-}
-
 async function onMessage(message) {
   if (message.author?.bot) return;
   if (!message.guild) return;
 
   setMessage(message);
-
-  if (message.channelId === config.contractChannelId) {
-    const content = (message.content || "").trim();
-    let normalizedAddress;
-    const isStrictAddress = /^0x[0-9a-fA-F]{40}$/.test(content);
-    if (!isStrictAddress) {
-      if (looksLikeAddressAttempt(content)) {
-        await message.reply("⛔ Invalid submission.");
-        return;
-      }
-      try {
-        await message.delete();
-      } catch (err) {
-        log.warn("Failed to delete non-contract message in contract channel.", err);
-      }
-      return;
-    }
-    try {
-      normalizedAddress = normalizeContractAddress("FLR", content);
-    } catch {
-      await message.reply("⛔ Invalid submission.");
-      return;
-    }
-
-    const verdict = await classifyAddress(normalizedAddress);
-    if (verdict === "fraud") {
-      await message.reply("🔒 Fraud registry match. Do not interact.");
-      return;
-    }
-    if (verdict === "clean") {
-      await message.reply("⚖️ No match found. No legitimacy implied.");
-      return;
-    }
-    await message.reply("⚠️ Classification unavailable.");
-    return;
-  }
 
   const content = message.content?.trim();
   if (!content || !content.startsWith("!")) return;
@@ -323,15 +277,15 @@ async function onMessage(message) {
     }
   }
 
-  if (command === "!interment") {
-    if (!message.member?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+  if (command === "!timeout") {
+    if (!message.member?.permissions?.has(PermissionFlagsBits.ModerateMembers)) {
       await message.reply("❌ You do not have permission to use this command.");
       return;
     }
 
     const userId = extractUserId(args[0]);
     if (!userId) {
-      await message.reply("Usage: `!interment <userId|@mention>`");
+      await message.reply("Usage: `!timeout <userId|@mention>`");
       return;
     }
 
@@ -339,18 +293,18 @@ async function onMessage(message) {
     try {
       target = await message.guild.members.fetch(userId);
     } catch (err) {
-      log.warn(`Failed to fetch member ${userId} for interment.`, err);
+      log.warn(`Failed to fetch member ${userId} for timeout.`, err);
       await message.reply("❌ User not found in this server.");
       return;
     }
 
     try {
-      await intermentMember(target, message.author?.tag);
-      await message.reply(`🔒 <@${userId}> has been placed in interment.`);
+      await timeoutMember(target, message.author?.tag);
+      await message.reply(`🔒 <@${userId}> has been timed out.`);
 
       await sendAdminLog(message.client, {
-        title: "Liquidity Shield: Manual Interment",
-        description: `Interment by ${message.author.tag}`,
+        title: "Liquidity Shield: Manual Timeout",
+        description: `Timeout by ${message.author.tag}`,
         color: 0xff9800,
         fields: [
           { name: "User", value: `${target.user.tag} (<@${userId}>)`, inline: true },
@@ -358,8 +312,8 @@ async function onMessage(message) {
         ],
       });
     } catch (err) {
-      log.error("interment command failed.", err);
-      await message.reply("❌ Failed to place user in interment. Check logs.");
+      log.error("timeout command failed.", err);
+      await message.reply("❌ Failed to timeout user. Check logs.");
     }
   }
 
@@ -816,7 +770,7 @@ async function onMessage(message) {
       "__Role Actions__",
       "`!elevate` — Set a user's role to one target role (humans only).",
       "`!reassign` — Set a user's role to one target role (humans only).",
-      "`!interment` — Strip roles and assign Penitent.",
+      "`!timeout` — Apply the configured moderation timeout.",
       "",
       "__Protection__",
       "`!protect` — Add or reactivate a protected ID.",

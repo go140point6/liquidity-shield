@@ -5,7 +5,7 @@ const { sendAdminLog } = require("../utils/adminLog");
 const {
   isImpersonation,
   isProtectedPrincipalId,
-  intermentMember,
+  timeoutMember,
   runImpersonationHealthCheck,
 } = require("../services/verificationGate");
 
@@ -57,7 +57,6 @@ async function onUserUpdate(oldUser, newUser, client) {
     await runImpersonationHealthCheck(client);
   }
 
-  if (member.roles.cache.has(config.roleJailId)) return;
   if (protectedId) {
     log.debug(
       `[impersonation-skip] protected principal id user=${newUser.tag} (${newUser.id})`
@@ -66,11 +65,11 @@ async function onUserUpdate(oldUser, newUser, client) {
   }
   if (!(await isImpersonation(guild.id, newName, newUser.id))) return;
 
-  await intermentMember(member, "impersonation-global");
+  await timeoutMember(member, "Global impersonation detected.");
 
   await sendAdminLog(client, {
     title: "Impersonation Detected (Global Name)",
-    description: `${newUser.tag} moved to interment.`,
+    description: `${newUser.tag} was timed out.`,
     color: 0xff5722,
     fields: [
       { name: "User", value: `<@${newUser.id}>`, inline: true },

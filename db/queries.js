@@ -167,17 +167,6 @@ function setVerified(db, { guildId, userId, at }) {
   ).run(at, guildId, userId);
 }
 
-function setJailed(db, { guildId, userId, at }) {
-  db.prepare(
-    `
-    UPDATE verification_state
-    SET status = 'jailed',
-        last_action_at = ?
-    WHERE guild_id = ? AND user_id = ?
-  `
-  ).run(at, guildId, userId);
-}
-
 function setKicked(db, { guildId, userId, at, verifyFails }) {
   db.prepare(
     `
@@ -703,7 +692,6 @@ module.exports = {
   getState,
   getDuePending,
   setVerified,
-  setJailed,
   setKicked,
   setBanned,
   setLeft,
