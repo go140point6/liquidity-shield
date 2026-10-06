@@ -7,8 +7,7 @@ This space is monitored. Your presence is logged.
 - Harassment, deception, or disruption is not tolerated.
 
 **:gear: Operation**
-- This system reads public blockchain data only.
-- It will never request secrets, signatures, or external authentication.
+- This server will never request secrets, signatures, or external authentication.
 
 **:eye: Reality**
 - Impersonation is expected.
@@ -17,10 +16,9 @@ This space is monitored. Your presence is logged.
 
 **:chains: Correction**
 - Silence and isolation are corrective tools.
-- They are applied without explanation.
 
 ---
 
-Acknowledge with :white_check_mark: to proceed. Failure is common.`;
+Acknowledge with :white_check_mark: to proceed.`;
 
 module.exports = { rulesText };
