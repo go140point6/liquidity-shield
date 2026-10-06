@@ -12,7 +12,7 @@ strict access control, impersonation defense, and clear admin visibility.
 Shield combines selected moderation behaviors into one custom workflow:
 
 - **Verification gate** with deadline enforcement (kick on first miss, ban on second).
-- **Standard Discord timeouts** for manual moderation and impersonation enforcement.
+- **Interment system** (Penitent role) for hard isolation instead of standard timeout flow.
 - **Rules reaction access** (react to gain verified access, unreact removes access).
 - **Channel content publishing/editing** for rules, FAQ, and quick-start posts.
 - **Protected identity controls** using protected Discord IDs and live name checks.
@@ -42,7 +42,7 @@ Shield uses `!` prefixed admin commands for setup and moderation workflows.
 
 ### Moderation actions
 
-- `!timeout`
+- `!interment`
 - `!ban`
 - `!resetfails`
 
@@ -69,11 +69,10 @@ On join, Shield starts a verification deadline. Members who verify in time are
 cleared. Members who miss are escalated: first miss kicks, second miss bans.
 State is stored in SQLite and processed by a restart-safe poller.
 
-### Moderation timeouts
+### Interment and role isolation
 
-Manual moderation and impersonation enforcement use Discord's standard timeout
-system. Verification deadline failures remain separate: the first missed
-deadline kicks the member and the second missed deadline bans them.
+Interment strips normal roles and assigns only the Penitent role, keeping users
+contained to designated channels until manually reassigned.
 
 ### Protected names and impersonation defense
 

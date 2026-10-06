@@ -106,12 +106,17 @@ async function handleMemberAdd(member) {
     userId: member.id,
   });
 
+  if (existingState?.status === "jailed" && !member.user?.bot) {
+    await applyJailOnJoin(member);
+    return;
+  }
+
   const joinName = getMemberCheckName(member);
   if (await isImpersonation(member.guild.id, joinName, member.id)) {
-    await timeoutMemberImpl(member, "impersonation-join");
+    await applyJailOnJoin(member);
     await sendAdminLog(member.client, {
       title: "Impersonation Detected (Join)",
-      description: `${member.user.tag} was timed out on join.`,
+      description: `${member.user.tag} moved to interment on join.`,
       color: 0xff5722,
       fields: [
         { name: "User", value: `<@${member.id}>`, inline: true },
@@ -120,7 +125,7 @@ async function handleMemberAdd(member) {
       ],
     });
     log.info(
-      `[impersonation] join timeout user=${member.user.tag} name=${joinName}`
+      `[impersonation] join interment user=${member.user.tag} name=${joinName}`
     );
     return;
   }
@@ -145,6 +150,13 @@ async function handleMemberAdd(member) {
       at: now,
     });
     joinStatus = "verified";
+  } else if (hasRole(member, config.roleJailId)) {
+    await queries.setJailed(db, {
+      guildId: member.guild.id,
+      userId: member.id,
+      at: now,
+    });
+    joinStatus = "jailed";
   }
 
   await queries.logModeration(db, {
@@ -189,6 +201,8 @@ async function handleMemberUpdate(oldMember, newMember) {
 
   const hadVerified = hasRole(oldMember, config.roleVerifiedId);
   const hasVerified = hasRole(newMember, config.roleVerifiedId);
+  const hadJailed = hasRole(oldMember, config.roleJailId);
+  const hasJailed = hasRole(newMember, config.roleJailId);
   const hadInitiate = hasRole(oldMember, config.roleInitiateId);
   const hasInitiate = hasRole(newMember, config.roleInitiateId);
 
@@ -209,11 +223,29 @@ async function handleMemberUpdate(oldMember, newMember) {
     log.info(`Member verified: ${newMember.user.tag} (${newMember.id})`);
   }
 
+  if (!hadJailed && hasJailed) {
+    const now = Date.now();
+    await queries.setJailed(db, {
+      guildId: newMember.guild.id,
+      userId: newMember.id,
+      at: now,
+    });
+    await queries.logModeration(db, {
+      guildId: newMember.guild.id,
+      userId: newMember.id,
+      action: "jailed",
+      status: "success",
+      at: now,
+    });
+    log.info(`Member jailed: ${newMember.user.tag} (${newMember.id})`);
+  }
+
   if (
     !newMember.user?.bot &&
     !hadInitiate &&
     hasInitiate &&
-    !hasVerified
+    !hasVerified &&
+    !hasJailed
   ) {
     const now = Date.now();
     const deadlineAt = now + config.verifyTimeoutMs;
@@ -358,6 +390,27 @@ async function addAutomataRole(member) {
     await member.roles.add(config.roleAutomataId, "Assigned to bot on join.");
   } catch (err) {
     log.warn(`Failed to add Automata role to ${member.id}.`, err);
+  }
+}
+
+async function applyJailOnJoin(member) {
+  try {
+    await member.roles.set([config.roleJailId], "Rejoin while jailed.");
+    await queries.setJailed(db, {
+      guildId: member.guild.id,
+      userId: member.id,
+      at: Date.now(),
+    });
+    await queries.logModeration(db, {
+      guildId: member.guild.id,
+      userId: member.id,
+      action: "rejoin_jailed",
+      status: "jailed",
+      at: Date.now(),
+    });
+    log.info(`Member rejoined while jailed: ${member.user.tag} (${member.id})`);
+  } catch (err) {
+    log.warn(`Failed to reapply jail role on join for ${member.id}.`, err);
   }
 }
 
@@ -817,7 +870,7 @@ async function processDueRow(client, row) {
     `[verify-poller] user=${row.user_id} status=${current?.status || "none"} ` +
       `fails=${row.verify_fails} deadline=${row.deadline_at} ` +
       `hasVerified=${hasRole(member, config.roleVerifiedId)} ` +
-      `timedOut=${member.communicationDisabledUntilTimestamp > now}`
+      `hasJailed=${hasRole(member, config.roleJailId)}`
   );
 
   if (hasRole(member, config.roleVerifiedId)) {
@@ -831,6 +884,22 @@ async function processDueRow(client, row) {
       userId: row.user_id,
       action: "verified",
       status: "success",
+      at: now,
+    });
+    return;
+  }
+
+  if (hasRole(member, config.roleJailId)) {
+    await queries.setJailed(db, {
+      guildId: row.guild_id,
+      userId: row.user_id,
+      at: now,
+    });
+    await queries.logModeration(db, {
+      guildId: row.guild_id,
+      userId: row.user_id,
+      action: "jailed",
+      status: "skipped",
       at: now,
     });
     return;
@@ -854,7 +923,7 @@ async function processDueRow(client, row) {
       log.info(
         `[verify-poller] kick user=${row.user_id} fails=${row.verify_fails} ` +
           `hasVerified=${hasRole(member, config.roleVerifiedId)} ` +
-          `timedOut=${member.communicationDisabledUntilTimestamp > now}`
+          `hasJailed=${hasRole(member, config.roleJailId)}`
       );
       await member.kick(reason);
       await queries.setKicked(db, {
@@ -892,7 +961,7 @@ async function processDueRow(client, row) {
     log.info(
       `[verify-poller] ban user=${row.user_id} fails=${row.verify_fails} ` +
         `hasVerified=${hasRole(member, config.roleVerifiedId)} ` +
-        `timedOut=${member.communicationDisabledUntilTimestamp > now}`
+        `hasJailed=${hasRole(member, config.roleJailId)}`
     );
     await guild.members.ban(row.user_id, { reason });
     await queries.setBanned(db, {
@@ -953,13 +1022,18 @@ async function handleActionError(client, row, action, err) {
   });
 }
 
-async function timeoutMemberImpl(member, actorTag) {
-  await member.timeout(config.moderationTimeoutMs, actorTag || "Moderation timeout.");
+async function intermentMemberImpl(member, actorTag) {
+  await member.roles.set([config.roleJailId], "Automated interment.");
   const now = Date.now();
+  await queries.setJailed(db, {
+    guildId: member.guild.id,
+    userId: member.id,
+    at: now,
+  });
   await queries.logModeration(db, {
     guildId: member.guild.id,
     userId: member.id,
-    action: "timeout",
+    action: "interment",
     status: "success",
     details: actorTag ? `actor=${actorTag}` : null,
     at: now,
@@ -985,12 +1059,12 @@ async function runProtectSweep(guild, protectedRow, actorTag) {
     if (member.user?.bot) continue;
     if (member.id === protectedRow.user_id) continue;
     if (protectedIds.has(member.id)) continue;
-    if (member.communicationDisabledUntilTimestamp > Date.now()) continue;
+    if (member.roles.cache.has(config.roleJailId)) continue;
 
     const currentName = getMemberCheckName(member);
     if (normalizeName(currentName) !== normalizedProtectedName) continue;
 
-    await timeoutMemberImpl(member, actorTag ? `${actorTag}:protect-sweep` : "protect-sweep");
+    await intermentMemberImpl(member, actorTag ? `${actorTag}:protect-sweep` : "protect-sweep");
     swept.push({
       userId: member.id,
       tag: member.user?.tag || member.id,
@@ -1009,9 +1083,9 @@ module.exports = {
   getProtectedNameSet,
   isImpersonation,
   runImpersonationHealthCheck,
-  timeoutMember: async (member, actorTag) => {
+  intermentMember: async (member, actorTag) => {
     if (!db) throw new Error("DB not initialized");
-    await timeoutMemberImpl(member, actorTag);
+    await intermentMemberImpl(member, actorTag);
   },
   clearRulesReactionById: async (guild, userId) => {
     if (!db) throw new Error("DB not initialized");
@@ -1103,6 +1177,20 @@ module.exports = {
       at: now,
     });
   },
+  setJailedForUser: async (guildId, userId, actorTag) => {
+    if (!db) throw new Error("DB not initialized");
+
+    const now = Date.now();
+    queries.setJailed(db, { guildId, userId, at: now });
+    await queries.logModeration(db, {
+      guildId,
+      userId,
+      action: "jailed",
+      status: "success",
+      details: actorTag ? `actor=${actorTag}` : null,
+      at: now,
+    });
+  },
   protectPrincipal: async (guild, userId, actorTag, notes) => {
     if (!db) throw new Error("DB not initialized");
 
@@ -1132,7 +1220,7 @@ module.exports = {
     const swept = await runProtectSweep(guild, protectedRow, actorTag);
     if (swept.length > 0) {
       await sendAdminLog(guild.client, {
-        title: "Protection Sweep Timeout",
+        title: "Protection Sweep Interment",
         description:
           "Non-protected users already using a newly protected name were interred.",
         color: 0xff5722,
@@ -1200,7 +1288,7 @@ module.exports = {
     );
     if (swept.length > 0) {
       await sendAdminLog(guild.client, {
-        title: "Protection Sweep Timeout",
+        title: "Protection Sweep Interment",
         description:
           "Non-protected users already using a newly protected alias were interred.",
         color: 0xff5722,

@@ -220,17 +220,17 @@ and `EXCLUDED_CATEGORY_IDS` in `.env`.
 
 It also logs bans, kicks/leaves, nickname changes, and timeouts.
 
-## !timeout
+## !interment
 
-Applies the configured standard Discord timeout to a user.
+Strips all roles from a user and assigns the Penitent role.
 
 Usage:
 
 ```
-!timeout <userId|@mention>
+!interment <userId|@mention>
 ```
 
-Required permission: `Moderate Members`
+Required permission: `Manage Roles`
 
 ## !copyroleperms
 

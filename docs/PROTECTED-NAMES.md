@@ -25,7 +25,7 @@ Shield now uses a **DB-first protected principal model**.
 
 Adds or re-activates a protected ID.
 Also performs an immediate sweep for non-protected members already using that
-protected name and times out matches.
+protected name and moves matches to interment.
 
 ```
 !protect <userId|@mention> [notes]
