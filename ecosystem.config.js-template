@@ -4,7 +4,7 @@ module.exports = {
       name: "liquidity-shield",
       cwd: "/home/user/liquidity-shield",
       script: "index.js",
-      interpreter: "/home/ryan/.nvm/versions/node/v24.21.0/bin/node",
+      interpreter: "/home/user/.nvm/versions/node/v24.21.0/bin/node",
       exec_mode: "fork",
       instances: 1,
       autorestart: true,
